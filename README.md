@@ -20,7 +20,7 @@ Mencal puts today's date in the menu bar (e.g. `Thu 19 Nov`) in the standard men
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/calendar-menu-dark.png">
-    <img src="docs/images/calendar-menu-light.png" width="320" alt="Mencal's menu: a month calendar with today's events">
+    <img src="docs/images/calendar-menu-light.png" width="305" alt="Mencal's menu: a month calendar with today's events as menu items">
   </picture>
 </p>
 
@@ -29,9 +29,14 @@ Mencal puts today's date in the menu bar (e.g. `Thu 19 Nov`) in the standard men
 - **Menu bar text only.** Weekday, day and short month by default. Each part (weekday, day, month, year) can be changed, or you can type a Unicode date pattern. Order and punctuation follow your region (System Settings › General › Language & Region).
 - **A real menu.** The calendar sits inside a standard `NSMenu`, above ordinary *Open Calendar* and *Settings…* items, so macOS draws, places and tracks it like its own menu bar menus.
 - **Month grid.** The first weekday (which can be overridden), numerals and week numbers follow your region. Dots under a day show which calendars have events. The selected day has a Liquid Glass bubble.
-- **Day agenda.** All-day events first, then timed events with times and locations. Today's finished events are tucked behind an *earlier events* toggle. The list opens tall enough for the month's tallest days (about five events at most; busier days scroll), and shows up to 100 events a day with a link to the rest in Calendar.app.
+- **Day agenda.** The selected day's events are standard menu items under the calendar: the title, the time and location as a subtitle, and a dot in the calendar's colour. Today's finished events sit in an *earlier events* submenu. Up to 8 upcoming events are listed (fewer if the screen is short, so Open Calendar and Settings stay in view); the rest are in a *more events* submenu. Days with over 100 events link to the remainder in Calendar.app.
+
+<p align="center">
+  <img src="docs/images/calendar-menu-earlier-events.png" width="450" alt="The earlier events submenu, listing today's finished events">
+</p>
+
 - **Read-only.** Mencal never writes to your calendars. Clicking an event opens it in Calendar.app; *Open Calendar* or double-clicking a day opens the app for edits.
-- **Settings.** Menu bar format; week start, week numbers, dimmed weekends, all-day events and whether to remember the earlier-events choice; which calendars to show; open at login; quit. Opening Mencal again (from Finder or Spotlight) shows Settings, in case the menu bar item is hidden.
+- **Settings.** Menu bar format; week start, week numbers, dimmed weekends and all-day events; which calendars to show; open at login; quit. Opening Mencal again (from Finder or Spotlight) shows Settings, in case the menu bar item is hidden.
 
 <p align="center">
   <img src="docs/images/settings-menu-bar.png" width="400" alt="Menu Bar settings">
@@ -61,7 +66,7 @@ The project signs to run locally (`CODE_SIGN_IDENTITY = "-"`), and Release sets 
 
 - **Read-only by construction.** Only `CalendarStore` imports EventKit. It uses read APIs alone and hands out value copies, never EventKit objects.
 - **Energy.** No timers. The date updates only when macOS reports a day, clock, time-zone or region change, on wake, and when the menu opens. Events are fetched once per opening, and again only when the visible month, calendar data or settings change. Calendar syncs while the menu is closed cost almost nothing. The settings window is released when closed.
-- **Sizing the menu.** An open `NSMenu` can't resize, and a SwiftUI view that has left a window defers its updates. So the calendar view is built fresh for each opening, measured with the month's tallest days laid out invisibly, then held at that size while open.
+- **Sizing the menu.** A SwiftUI view that has left a window defers its updates, so the calendar view is built fresh for each opening, measured, then held at that size while open. The events are native items, which `NSMenu` lays out itself when another day is picked.
 - **Robust to hostile feeds.** Event text is shown as plain text, events are grouped by binary search with a 100-per-day cap, and custom date patterns are stripped of invisible control characters.
 - **Sandboxed.** App Sandbox and Hardened Runtime, with the calendars entitlement and nothing else (no network access).
 
@@ -71,6 +76,7 @@ The project signs to run locally (`CODE_SIGN_IDENTITY = "-"`), and Release sets 
 Mencal/
   App/MencalMain.swift                 Entry point, app delegate, key-equivalent menu
   App/StatusItemController.swift       NSStatusItem + NSMenu hosting the SwiftUI calendar
+  App/DayEventMenuItems.swift          The selected day's events as native menu items
   App/SettingsWindowController.swift   Toolbar-tab settings window
   App/ExternalApps.swift               Hand-offs to Calendar.app and System Settings
   Model/CalendarStore.swift            Read-only EventKit access
@@ -78,7 +84,7 @@ Mencal/
   Model/EventLayout.swift              Date logic: grid days, grouping events by day, time text
   Model/MenuBarFormat.swift            Region-aware menu bar text and its options
   Model/Preferences.swift              Settings keys and defaults
-  Views/                               Calendar menu, month grid, event list, settings tabs
+  Views/                               Calendar menu, month grid, settings tabs
   Localizable.xcstrings, InfoPlist.xcstrings   String catalogs (plurals, privacy prompt)
   AppIcon.icon/                        Layered Liquid Glass app icon (open in Icon Composer)
 MencalTests/                           Unit tests (Swift Testing)

@@ -14,6 +14,15 @@ struct MonthGrid: View {
 
     @Namespace private var glassNamespace
 
+    /// Fixed column widths, so the grid is the same with or without week
+    /// numbers and its parent sizes to it, with even margins either side.
+    static let dayColumnWidth: CGFloat = 38
+    static let weekColumnWidth: CGFloat = 22
+
+    static func width(showWeekNumbers: Bool) -> CGFloat {
+        dayColumnWidth * 7 + (showWeekNumbers ? weekColumnWidth : 0)
+    }
+
     private var weekdaySymbols: [String] {
         let symbols = calendar.veryShortStandaloneWeekdaySymbols
         let first = calendar.firstWeekday - 1
@@ -37,7 +46,7 @@ struct MonthGrid: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(dimWeekends && weekendColumns[column]
                                              ? HierarchicalShapeStyle.secondary : .primary)
-                            .frame(maxWidth: .infinity)
+                            .frame(width: Self.dayColumnWidth)
                             .padding(.vertical, 4)
                     }
                 }
@@ -55,7 +64,7 @@ struct MonthGrid: View {
                                 .font(.caption2)
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
-                                .frame(width: 20)
+                                .frame(width: Self.weekColumnWidth, alignment: .leading)
                         }
                         ForEach(0..<7, id: \.self) { column in
                             let day = days[week * 7 + column]
@@ -127,7 +136,7 @@ private struct DayCell: View {
             .frame(height: 4)
             .opacity(isInMonth ? 1 : 0.4)
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: MonthGrid.dayColumnWidth)
         .padding(.vertical, 2)
         .contentShape(.rect)
         .onHover { isHovering = $0 }

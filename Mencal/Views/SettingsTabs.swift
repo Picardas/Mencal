@@ -194,7 +194,6 @@ struct CalendarSettings: View {
     @AppStorage(PrefKey.firstWeekday) private var firstWeekday = PrefDefault.firstWeekday
     @AppStorage(PrefKey.dimWeekends) private var dimWeekends = PrefDefault.dimWeekends
     @AppStorage(PrefKey.showAllDayEvents) private var showAllDayEvents = PrefDefault.showAllDayEvents
-    @AppStorage(PrefKey.rememberPastEvents) private var rememberPastEvents = PrefDefault.rememberPastEvents
 
     var body: some View {
         Form {
@@ -211,10 +210,6 @@ struct CalendarSettings: View {
                 Toggle(isOn: $showAllDayEvents) {
                     Text("Show all-day events")
                     Text("Includes events lasting 24 hours or more.")
-                }
-                Toggle(isOn: $rememberPastEvents) {
-                    Text("Remember earlier events choice")
-                    Text("When off, today's finished events are hidden each time you open the menu.")
                 }
             }
 

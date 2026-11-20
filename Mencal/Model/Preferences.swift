@@ -13,10 +13,6 @@ enum PrefKey {
     static let firstWeekday = "calendar.firstWeekday"
     static let dimWeekends = "calendar.dimWeekends"
     static let showAllDayEvents = "calendar.showAllDayEvents"
-    /// Restore the last earlier-events choice on open, instead of hiding them.
-    static let rememberPastEvents = "calendar.rememberPastEvents"
-    /// The last earlier-events choice.
-    static let showPastEvents = "calendar.showPastEvents"
     static let hiddenCalendarIDs = "calendar.hiddenCalendarIDs"
 }
 
@@ -28,8 +24,6 @@ enum PrefDefault {
     static let firstWeekday = 0
     static let dimWeekends = true
     static let showAllDayEvents = true
-    static let rememberPastEvents = false
-    static let showPastEvents = false
 }
 
 extension Calendar {

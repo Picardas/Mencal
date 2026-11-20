@@ -139,17 +139,4 @@ enum EventLayout {
             )
         }
     }
-
-    /// Rows laid out (invisibly) per sizing day: enough to pass the list's
-    /// maximum height, so more would be measured for nothing.
-    static let maxSizingRows = 8
-
-    /// A rough relative height for a day's list: one per row, plus extra for
-    /// a location line or a title likely to wrap. Only picks candidates; the
-    /// real height is measured.
-    static func estimatedHeight(of events: [CalendarEvent]) -> Double {
-        events.prefix(maxSizingRows).reduce(0) { total, event in
-            total + 1 + (event.location == nil ? 0 : 0.35) + (event.title.count > 32 ? 0.4 : 0)
-        }
-    }
 }

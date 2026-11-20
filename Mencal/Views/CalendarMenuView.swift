@@ -1,39 +1,32 @@
 import SwiftUI
 
-/// The calendar at the top of Mencal's menu: a month grid with the selected
-/// day's events underneath. StatusItemController builds it fresh for each
-/// opening, so its state always starts from today.
+/// The calendar at the top of Mencal's menu: a month grid. The selected
+/// day's events are native menu items below it, which StatusItemController
+/// builds from what this view publishes. It's built fresh for each opening,
+/// so its state always starts from today.
 struct CalendarMenuView: View {
     @Environment(DateTicker.self) private var ticker
     @Environment(CalendarStore.self) private var store
+    @Environment(\.showDayEvents) private var showDayEvents
 
     @AppStorage(PrefKey.showWeekNumbers) private var showWeekNumbers = PrefDefault.showWeekNumbers
     @AppStorage(PrefKey.firstWeekday) private var firstWeekday = PrefDefault.firstWeekday
     @AppStorage(PrefKey.dimWeekends) private var dimWeekends = PrefDefault.dimWeekends
     @AppStorage(PrefKey.showAllDayEvents) private var showAllDayEvents = PrefDefault.showAllDayEvents
-    @AppStorage(PrefKey.showPastEvents) private var savedShowPastEvents = PrefDefault.showPastEvents
 
     @State private var displayedMonth = Date()
     @State private var selectedDay = Calendar.autoupdatingCurrent.startOfDay(for: Date())
     @State private var eventsByDay: [Date: DayEvents] = [:]
     /// The data the shown events were read with.
     @State private var loadedKey: FetchKey?
-    /// Chosen once per opening, because the menu's height is fixed while
-    /// it's open.
-    @State private var sizingDays: [[CalendarEvent]]?
     @State private var monthDirection: Edge = .trailing
-    @State private var showPastEvents: Bool
 
     private static let monthAnimation = Animation.snappy(duration: 0.28)
 
-    init() {
-        // Earlier events start hidden unless the user chose to remember.
-        let defaults = UserDefaults.standard
-        let remember = defaults.object(forKey: PrefKey.rememberPastEvents) as? Bool ?? PrefDefault.rememberPastEvents
-        let saved = defaults.object(forKey: PrefKey.showPastEvents) as? Bool ?? PrefDefault.showPastEvents
-        _showPastEvents = State(initialValue: remember && saved)
+    private static let horizontalPadding: CGFloat = 14
+    private var width: CGFloat {
+        MonthGrid.width(showWeekNumbers: showWeekNumbers) + Self.horizontalPadding * 2
     }
-
     private var calendar: Calendar { .mencal(firstWeekday: firstWeekday) }
     private var today: Date { calendar.startOfDay(for: ticker.now) }
 
@@ -49,7 +42,7 @@ struct CalendarMenuView: View {
             )
 
             // The ZStack keeps the outgoing and incoming grids in one slot
-            // during the push, so the list below doesn't move.
+            // during the push.
             ZStack {
                 MonthGrid(
                     calendar: calendar,
@@ -65,34 +58,32 @@ struct CalendarMenuView: View {
             }
             .clipped()
 
-            Divider()
-
-            if store.access == .granted {
-                DayEventList(
-                    day: selectedDay,
-                    today: today,
-                    now: ticker.now,
-                    calendar: calendar,
-                    dayEvents: eventsByDay[selectedDay] ?? DayEvents(),
-                    sizingDays: sizingDays ?? [],
-                    showPastEvents: $showPastEvents
-                )
-            } else {
+            if store.access != .granted {
+                Divider()
                 AccessPrompt()
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Self.horizontalPadding)
         .padding(.top, 10)
         .padding(.bottom, 6)
-        .frame(width: showWeekNumbers ? 316 : 296)
+        .frame(width: width)
         // While the menu is open its height is held; keep the content pinned
         // to the top rather than centred if it would be shorter.
         .frame(maxHeight: .infinity, alignment: .top)
         .clipped()
         .onChange(of: today) { jumpToToday(animated: false) }
-        .onChange(of: showPastEvents) { savedShowPastEvents = showPastEvents }
-        // Runs on the first layout, before the menu measures the view.
+        // Runs on the first layout, before the menu measures its items.
         .onChange(of: fetchKey, initial: true) { reloadEvents() }
+        // A new day in the same grid needs no fetch. When a fetch is due
+        // (the day left the grid, or the month changed with it), the reload
+        // publishes instead, so the items aren't built from stale events.
+        .onChange(of: selectedDay) {
+            if fetchKey == loadedKey { publishSelectedDay() }
+        }
+        // Which of today's events are finished.
+        .onChange(of: ticker.now) {
+            if fetchKey == loadedKey { publishSelectedDay() }
+        }
     }
 
     // MARK: - Navigation
@@ -160,30 +151,24 @@ struct CalendarMenuView: View {
 
         eventsByDay = buckets
         loadedKey = key
-        if sizingDays == nil {
-            sizingDays = tallestDays(in: buckets)
-        }
+        publishSelectedDay(from: buckets)
+    }
+
+    /// Hands the selected day's events to the menu. `buckets` is passed
+    /// right after a reload, rather than read back from state.
+    private func publishSelectedDay(from buckets: [Date: DayEvents]? = nil) {
+        showDayEvents(DaySelection(
+            day: selectedDay,
+            today: today,
+            now: ticker.now,
+            calendar: calendar,
+            events: store.access == .granted ? (buckets ?? eventsByDay)[selectedDay] ?? DayEvents() : nil,
+            width: width
+        ))
     }
 
     private func shownEvents(in interval: DateInterval) -> [CalendarEvent] {
         store.events(in: interval).filter { showAllDayEvents || !$0.isAllDayOrMultiDay }
-    }
-
-    /// The shown month's tallest-looking days. Rows differ in height (a
-    /// location line, two-line titles), so a rough estimate shortlists a few
-    /// and the list measures them exactly. Ties go to the earliest day, so
-    /// the choice (and the menu's height) is the same every time.
-    private func tallestDays(in buckets: [Date: DayEvents]) -> [[CalendarEvent]] {
-        buckets
-            .filter { calendar.isDate($0.key, equalTo: displayedMonth, toGranularity: .month) }
-            .map { (day: $0.key, events: $0.value.events) }
-            .sorted { a, b in
-                let heightA = EventLayout.estimatedHeight(of: a.events)
-                let heightB = EventLayout.estimatedHeight(of: b.events)
-                return heightA != heightB ? heightA > heightB : a.day < b.day
-            }
-            .prefix(3)
-            .map(\.events)
     }
 }
 
