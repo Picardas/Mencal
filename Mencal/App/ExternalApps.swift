@@ -2,9 +2,20 @@ import AppKit
 
 /// Hands everything that isn't read-only to Calendar.app.
 enum CalendarApp {
+    /// Calendar.app on the protected system volume, never another app that
+    /// claims its bundle identifier.
     private static var appURL: URL? {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal")
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal"),
+              url.resolvingSymlinksInPath().path.hasPrefix("/System/")
+        else { return URL(fileURLWithPath: "/System/Applications/Calendar.app") }
+        return url
     }
+
+    /// RFC 3986 unreserved characters; everything else in an identifier is
+    /// percent-encoded, so it can't add to the URL's path or query.
+    private static let identifierCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
 
     static func open() {
         guard let appURL else { return }
@@ -19,7 +30,6 @@ enum CalendarApp {
         let occurrence = event.start.formatted(
             Date.ISO8601FormatStyle(dateSeparator: .omitted, timeSeparator: .omitted, timeZone: .gmt)
         )
-        let identifierCharacters = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
         guard let appURL,
               let identifier = event.calendarItemIdentifier.addingPercentEncoding(withAllowedCharacters: identifierCharacters),
               let url = URL(string: "ical://ekevent/\(occurrence)/\(identifier)?method=show&options=more")

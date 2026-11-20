@@ -14,6 +14,8 @@ enum PrefKey {
     static let dimWeekends = "calendar.dimWeekends"
     static let showAllDayEvents = "calendar.showAllDayEvents"
     static let hiddenCalendarIDs = "calendar.hiddenCalendarIDs"
+    /// Hidden calendars by account and title, for when their IDs change.
+    static let hiddenCalendarNames = "calendar.hiddenCalendarNames"
 }
 
 /// Defaults for the calendar settings, shared by every `@AppStorage` that

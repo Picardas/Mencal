@@ -52,6 +52,6 @@ import Testing
         var format = MenuBarFormat()
         format.useCustomFormat = true
         format.customFormat = "   "
-        #expect(format.string(for: thursday).isEmpty)
+        #expect(format.string(for: thursday, locale: Locale(identifier: "en_GB"), calendar: gregorian, timeZone: london).isEmpty)
     }
 }

@@ -1,24 +1,27 @@
+import CoreGraphics
 import Foundation
-import SwiftUI
 import Testing
 @testable import Mencal
 
-private func gregorian(_ timeZone: String, firstWeekday: Int = 2) -> Calendar {
+func gregorian(_ timeZone: String, firstWeekday: Int = 2) -> Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: timeZone)!
     calendar.firstWeekday = firstWeekday
     return calendar
 }
 
-private func date(_ calendar: Calendar, _ year: Int, _ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0) -> Date {
+func date(_ calendar: Calendar, _ year: Int, _ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0) -> Date {
     calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
 }
 
-private func event(_ start: Date, _ end: Date, allDay: Bool = false) -> CalendarEvent {
+func event(
+    _ start: Date, _ end: Date, allDay: Bool = false, title: String = "Event",
+    id: String = UUID().uuidString, calendarID: String = "calendar"
+) -> CalendarEvent {
     CalendarEvent(
-        id: UUID().uuidString, calendarItemIdentifier: "id", calendarID: "calendar",
-        calendarTitle: "Calendar", title: "Event", start: start, end: end,
-        isAllDay: allDay, location: nil, color: .blue
+        id: id, calendarItemIdentifier: "id", calendarID: calendarID,
+        calendarTitle: "Calendar", title: title, start: start, end: end,
+        isAllDay: allDay, location: nil, color: CGColor(red: 0, green: 0, blue: 1, alpha: 1)
     )
 }
 

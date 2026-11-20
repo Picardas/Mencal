@@ -59,20 +59,11 @@ struct MenuBarFormat {
     /// Reused: this runs on every UserDefaults write and Settings preview.
     private static let customFormatter = DateFormatter()
 
-    /// A custom pattern without control, line-break or invisible formatting
-    /// characters (such as a right-to-left override), capped by Unicode scalar so
-    /// stacked combining marks can't get past the limit, then trimmed.
+    /// A custom pattern on one line, without invisible formatting characters
+    /// (such as a right-to-left override), capped by Unicode scalar so stacked
+    /// combining marks can't get past the limit.
     static func sanitized(_ pattern: String) -> String {
-        var scalars = String.UnicodeScalarView()
-        for scalar in pattern.unicodeScalars where scalars.count < maxCustomFormatLength {
-            // Keep the zero-width joiner, which holds emoji sequences together.
-            switch scalar.properties.generalCategory {
-            case .control, .lineSeparator, .paragraphSeparator: continue
-            case .format where scalar != "\u{200D}": continue
-            default: scalars.append(scalar)
-            }
-        }
-        return String(scalars).trimmingCharacters(in: .whitespaces)
+        DisplayText.line(pattern, limit: maxCustomFormatLength, marksCut: false)
     }
 }
 

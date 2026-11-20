@@ -45,12 +45,13 @@ struct GeneralSettings: View {
                 }
             }
         }
-        .formStyle(.grouped)
-        .scrollDisabled(true)
-        .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
-        // The login item can also be changed in System Settings.
+        .settingsPane()
+        // The login item can also be changed in System Settings, including
+        // while this window is open.
         .onAppear { syncLoginItem() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            syncLoginItem()
+        }
     }
 
     /// A login item opens whichever copy registered it, so only offer it when
@@ -178,10 +179,7 @@ struct MenuBarSettings: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
-        .scrollDisabled(true)
-        .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
+        .settingsPane()
     }
 }
 
@@ -217,7 +215,7 @@ struct CalendarSettings: View {
         }
         .formStyle(.grouped)
         // Fixed height: the calendar list can be long, so it scrolls.
-        .frame(width: 480, height: 480)
+        .frame(width: SettingsPane.width, height: 480)
         .onAppear { store.refreshAccess() }
     }
 
@@ -240,7 +238,7 @@ struct CalendarSettings: View {
                                 Text(calendar.title)
                             } icon: {
                                 Circle()
-                                    .fill(calendar.color)
+                                    .fill(Color(cgColor: calendar.color))
                                     .frame(width: 10, height: 10)
                             }
                         }
@@ -285,14 +283,24 @@ struct CalendarSettings: View {
 
     private func isVisible(_ calendar: CalendarInfo) -> Binding<Bool> {
         Binding(
-            get: { !store.hiddenCalendarIDs.contains(calendar.id) },
-            set: { visible in
-                if visible {
-                    store.hiddenCalendarIDs.remove(calendar.id)
-                } else {
-                    store.hiddenCalendarIDs.insert(calendar.id)
-                }
-            }
+            get: { !store.isHidden(calendar) },
+            set: { store.setHidden(!$0, for: calendar) }
         )
+    }
+}
+
+// MARK: - Shared
+
+private enum SettingsPane {
+    static let width: CGFloat = 480
+}
+
+private extension View {
+    /// A grouped form that fits its content, for the shorter tabs.
+    func settingsPane() -> some View {
+        formStyle(.grouped)
+            .scrollDisabled(true)
+            .frame(width: SettingsPane.width)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

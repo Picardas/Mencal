@@ -1,10 +1,10 @@
 import AppKit
-import SwiftUI
 
 /// Builds the selected day's events as standard menu items: a section
 /// header, one item per event (title, a time and location subtitle, and a
 /// dot in the calendar's colour). Today's finished events, and events that
-/// don't fit, are in submenus, which scroll on their own if they need to.
+/// don't fit, are in submenus, which are filled when opened and scroll on
+/// their own if they need to.
 @MainActor
 enum DayEventMenuItems {
     /// Upcoming events listed in the menu itself; the rest are in a submenu.
@@ -15,33 +15,25 @@ enum DayEventMenuItems {
     static func items(
         for selection: DaySelection,
         limit: Int = maxShownEvents,
+        fitter: TextFitter,
         target: AnyObject,
         openEvent: Selector,
         openCalendar: Selector
     ) -> [NSMenuItem] {
         guard let dayEvents = selection.events else { return [] }
-        let isToday = selection.day == selection.today
-        let events = dayEvents.events
-        let past = isToday ? events.filter { $0.end <= selection.now } : []
-        let upcoming = isToday ? events.filter { $0.end > selection.now } : events
-        let shown = upcoming.prefix(max(limit, 0))
-        let overflow = upcoming.dropFirst(shown.count)
+        let split = selection.split
+        let shown = split.upcoming.prefix(max(limit, 0))
+        let overflow = Array(split.upcoming.dropFirst(shown.count))
         // Past the per-day cap, so never read; only Calendar has them.
-        let beyondCap = dayEvents.count - events.count
+        let beyondCap = dayEvents.count - dayEvents.events.count
 
-        let fitter = TextFitter(width: selection.width)
-        var dots: [String: NSImage] = [:]
         func eventItem(_ event: CalendarEvent) -> NSMenuItem {
             let item = NSMenuItem(title: fitter.title(event.title), action: openEvent, keyEquivalent: "")
             item.target = target
             item.representedObject = event
             let time = EventLayout.timeText(for: event, on: selection.day, calendar: selection.calendar)
             item.subtitle = fitter.subtitle([time, event.location].compactMap(\.self).joined(separator: " · "))
-            item.image = dots[event.calendarID] ?? {
-                let dot = dotImage(NSColor(event.color), description: event.calendarTitle)
-                dots[event.calendarID] = dot
-                return dot
-            }()
+            item.image = dotImage(event.color, description: event.calendarTitle)
             // From macOS 27, menus hide item images unless asked; the dot
             // carries the calendar's colour, so it's always shown.
             if #available(macOS 27, *) {
@@ -51,30 +43,23 @@ enum DayEventMenuItems {
             return item
         }
 
-        var items = [NSMenuItem.sectionHeader(title: headerTitle(for: selection))]
-
-        func submenuItem(_ title: String, _ submenuItems: [NSMenuItem]) -> NSMenuItem {
-            let submenu = NSMenu()
-            submenu.autoenablesItems = false
-            submenu.items = submenuItems
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.submenu = submenu
-            return item
-        }
-
         func calendarLinkItem() -> NSMenuItem {
             let item = NSMenuItem(title: String(localized: "\(beyondCap) more events in Calendar"), action: openCalendar, keyEquivalent: "")
             item.target = target
             return item
         }
 
-        if !past.isEmpty {
-            items.append(submenuItem(String(localized: "\(past.count) earlier events"), past.map(eventItem)))
+        var items = [NSMenuItem.sectionHeader(title: headerTitle(for: selection))]
+
+        if !split.past.isEmpty {
+            items.append(LazySubmenu.item(title: String(localized: "\(split.past.count) earlier events")) {
+                split.past.map(eventItem)
+            })
         }
 
-        if upcoming.isEmpty {
+        if split.upcoming.isEmpty {
             let empty = NSMenuItem(
-                title: events.isEmpty ? String(localized: "No events") : String(localized: "No more events today"),
+                title: dayEvents.events.isEmpty ? String(localized: "No events") : String(localized: "No more events today"),
                 action: nil,
                 keyEquivalent: ""
             )
@@ -85,22 +70,27 @@ enum DayEventMenuItems {
         }
 
         if !overflow.isEmpty {
-            var more = overflow.map(eventItem)
-            if beyondCap > 0 { more += [.separator(), calendarLinkItem()] }
-            items.append(submenuItem(String(localized: "\(overflow.count + beyondCap) more events"), more))
+            items.append(LazySubmenu.item(title: String(localized: "\(overflow.count + beyondCap) more events")) {
+                var more = overflow.map(eventItem)
+                if beyondCap > 0 { more += [.separator(), calendarLinkItem()] }
+                return more
+            })
         } else if beyondCap > 0 {
             items.append(calendarLinkItem())
         }
         return items
     }
 
-    /// "Today · Friday 20 November", or just the date beyond tomorrow.
+    /// "Today · Friday 20 November", or just the date beyond tomorrow, with
+    /// the year when it isn't this year.
     private static func headerTitle(for selection: DaySelection) -> String {
-        let date = selection.day.formatted(
-            Date.FormatStyle(calendar: selection.calendar, timeZone: selection.calendar.timeZone)
-                .weekday(.wide).day().month(.wide)
-        )
-        let offset = EventLayout.dayOffset(from: selection.today, to: selection.day, calendar: selection.calendar)
+        let calendar = selection.calendar
+        var style = Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).weekday(.wide).day().month(.wide)
+        if !calendar.isDate(selection.day, equalTo: selection.today, toGranularity: .year) {
+            style = style.year()
+        }
+        let date = selection.day.formatted(style)
+        let offset = EventLayout.dayOffset(from: selection.today, to: selection.day, calendar: calendar)
         guard abs(offset) <= 1 else { return date }
         let relative = relativeFormatter.localizedString(from: DateComponents(day: offset))
         return String(localized: "\(relative) · \(date)")
@@ -114,51 +104,78 @@ enum DayEventMenuItems {
         return formatter
     }()
 
-    /// A small filled circle, like Calendar.app's, in a standard image slot.
-    private static func dotImage(_ color: NSColor, description: String) -> NSImage {
-        let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
-            color.setFill()
-            NSBezierPath(ovalIn: rect.insetBy(dx: 2, dy: 2)).fill()
-            return true
-        }
-        image.accessibilityDescription = description
-        return image
+    /// A small filled circle in the calendar's colour, like Calendar.app's.
+    private static func dotImage(_ color: CGColor, description: String) -> NSImage? {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 8, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(cgColor: color) ?? .controlAccentColor]))
+        return NSImage(systemSymbolName: "circle.fill", accessibilityDescription: description)?
+            .withSymbolConfiguration(configuration)
+    }
+}
+
+/// A submenu whose items are built when it's about to open, so a day with a
+/// hundred events doesn't build items nobody looks at. The item keeps it
+/// (as its `representedObject`), since a menu's delegate is weak.
+private final class LazySubmenu: NSObject, NSMenuDelegate {
+    private let build: () -> [NSMenuItem]
+
+    private init(build: @escaping () -> [NSMenuItem]) {
+        self.build = build
+    }
+
+    static func item(title: String, build: @escaping () -> [NSMenuItem]) -> NSMenuItem {
+        let lazy = LazySubmenu(build: build)
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        submenu.delegate = lazy
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        item.representedObject = lazy
+        return item
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu.items.isEmpty else { return }
+        menu.items = build()
     }
 }
 
 /// Shortens event text to the calendar's width, so a long title can't widen
-/// the menu past the calendar. Text is set as a plain string, never parsed.
-private struct TextFitter {
+/// the menu past the calendar. Text arrives already on one line and capped
+/// (see `DisplayText`); it's set as a plain string, never parsed. Results
+/// are kept for the menu's opening, since the same text is fitted again
+/// whenever the items are rebuilt.
+@MainActor
+final class TextFitter {
     /// Room left after the menu's image column and insets.
-    private let titleWidth: CGFloat
+    private let width: CGFloat
     private let titleFont = NSFont.menuFont(ofSize: 0)
     private let subtitleFont = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
+    private var fitted: [String: String] = [:]
 
-    /// Hostile feeds can carry huge titles; nothing longer is measured.
-    private static let maxCharacters = 200
-
-    init(width: CGFloat) {
-        titleWidth = max(width - 64, 80)
+    init(menuWidth: CGFloat) {
+        width = max(menuWidth - 64, 80)
     }
 
-    func title(_ text: String) -> String { fit(text, font: titleFont) }
-    func subtitle(_ text: String) -> String { fit(text, font: subtitleFont) }
+    func title(_ text: String) -> String { fit(text, font: titleFont, key: "t" + text) }
+    func subtitle(_ text: String) -> String { fit(text, font: subtitleFont, key: "s" + text) }
 
-    private func fit(_ text: String, font: NSFont) -> String {
-        // One line: newlines and other control characters become spaces.
-        let flat = String(String.UnicodeScalarView(text.prefix(Self.maxCharacters).unicodeScalars.map {
-            $0.properties.generalCategory == .control || $0.properties.isWhitespace ? " " : $0
-        }))
-        .trimmingCharacters(in: .whitespaces)
-        guard width(of: flat, font: font) > titleWidth else { return flat }
+    private func fit(_ text: String, font: NSFont, key: String) -> String {
+        if let result = fitted[key] { return result }
+        let result = shortened(text, font: font)
+        fitted[key] = result
+        return result
+    }
 
+    private func shortened(_ text: String, font: NSFont) -> String {
+        guard measure(text, font: font) > width else { return text }
         // The longest prefix (in characters) that fits with an ellipsis.
-        let characters = Array(flat)
+        let characters = Array(text.hasSuffix("…") ? String(text.dropLast()) : text)
         var low = 0
         var high = characters.count
         while low < high {
             let mid = (low + high + 1) / 2
-            if width(of: String(characters[..<mid]) + "…", font: font) <= titleWidth {
+            if measure(String(characters[..<mid]) + "…", font: font) <= width {
                 low = mid
             } else {
                 high = mid - 1
@@ -167,7 +184,7 @@ private struct TextFitter {
         return String(characters[..<low]).trimmingCharacters(in: .whitespaces) + "…"
     }
 
-    private func width(of text: String, font: NSFont) -> CGFloat {
+    private func measure(_ text: String, font: NSFont) -> CGFloat {
         (text as NSString).size(withAttributes: [.font: font]).width
     }
 }

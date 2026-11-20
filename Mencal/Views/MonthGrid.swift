@@ -11,11 +11,14 @@ struct MonthGrid: View {
     let eventsByDay: [Date: DayEvents]
     let showWeekNumbers: Bool
     let dimWeekends: Bool
+    /// False while the month and year pickers cover the grid.
+    let isInteractive: Bool
 
-    @Namespace private var glassNamespace
+    @Namespace private var selectionNamespace
 
-    /// Fixed column widths, so the grid is the same with or without week
-    /// numbers and its parent sizes to it, with even margins either side.
+    /// Fixed column widths, so the day columns are the same with or without
+    /// week numbers (which add their own column) and the parent sizes to the
+    /// grid, with even margins either side.
     static let dayColumnWidth: CGFloat = 38
     static let weekColumnWidth: CGFloat = 22
 
@@ -23,10 +26,9 @@ struct MonthGrid: View {
         dayColumnWidth * 7 + (showWeekNumbers ? weekColumnWidth : 0)
     }
 
-    private var weekdaySymbols: [String] {
-        let symbols = calendar.veryShortStandaloneWeekdaySymbols
-        let first = calendar.firstWeekday - 1
-        return Array(symbols[first...] + symbols[..<first])
+    /// The columns' weekdays (1–7), starting from the first weekday.
+    private var weekdays: [Int] {
+        (0..<7).map { (calendar.firstWeekday - 1 + $0) % 7 + 1 }
     }
 
     var body: some View {
@@ -35,52 +37,52 @@ struct MonthGrid: View {
         // Weekend days come from the region (e.g. Fri/Sat in some locales).
         let weekendColumns = (0..<7).map { days.indices.contains($0) && calendar.isDateInWeekend(days[$0]) }
 
-        GlassEffectContainer(spacing: 2) {
-            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+        Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+            GridRow {
+                if showWeekNumbers {
+                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                }
+                ForEach(Array(weekdays.enumerated()), id: \.offset) { column, weekday in
+                    Text(calendar.veryShortStandaloneWeekdaySymbols[weekday - 1])
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(dimWeekends && weekendColumns[column]
+                                         ? HierarchicalShapeStyle.secondary : .primary)
+                        .frame(width: Self.dayColumnWidth)
+                        .padding(.vertical, 4)
+                        .accessibilityLabel(calendar.standaloneWeekdaySymbols[weekday - 1])
+                }
+            }
+
+            ForEach(0..<weeks, id: \.self) { week in
                 GridRow {
                     if showWeekNumbers {
-                        Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                        let number = EventLayout.weekNumber(
+                            ofRow: days[(week * 7)..<(week * 7 + 7)],
+                            regionCalendar: .autoupdatingCurrent
+                        ) ?? 0
+                        Text(number, format: .number)
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: Self.weekColumnWidth, alignment: .leading)
+                            .accessibilityLabel(Text("Week \(number)"))
                     }
-                    ForEach(0..<weekdaySymbols.count, id: \.self) { column in
-                        Text(weekdaySymbols[column])
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(dimWeekends && weekendColumns[column]
-                                             ? HierarchicalShapeStyle.secondary : .primary)
-                            .frame(width: Self.dayColumnWidth)
-                            .padding(.vertical, 4)
-                    }
-                }
-
-                ForEach(0..<weeks, id: \.self) { week in
-                    GridRow {
-                        if showWeekNumbers {
-                            Text(
-                                EventLayout.weekNumber(
-                                    ofRow: days[(week * 7)..<(week * 7 + 7)],
-                                    regionCalendar: .autoupdatingCurrent
-                                ) ?? 0,
-                                format: .number
-                            )
-                                .font(.caption2)
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                                .frame(width: Self.weekColumnWidth, alignment: .leading)
-                        }
-                        ForEach(0..<7, id: \.self) { column in
-                            let day = days[week * 7 + column]
-                            DayCell(
-                                day: day,
-                                isInMonth: calendar.isDate(day, equalTo: month, toGranularity: .month),
-                                isToday: day == today,
-                                isSelected: day == selectedDay,
-                                isDimmedWeekend: dimWeekends && weekendColumns[column],
-                                dotColors: dotColors(for: day),
-                                glassNamespace: glassNamespace,
-                                onSelect: {
-                                    withAnimation(.bouncy(duration: 0.3)) { selectedDay = day }
-                                }
-                            )
-                        }
+                    ForEach(0..<7, id: \.self) { column in
+                        let day = days[week * 7 + column]
+                        DayCell(
+                            day: day,
+                            calendar: calendar,
+                            isInMonth: calendar.isDate(day, equalTo: month, toGranularity: .month),
+                            isToday: day == today,
+                            isSelected: day == selectedDay,
+                            isDimmedWeekend: dimWeekends && weekendColumns[column],
+                            dotColors: dotColors(for: day),
+                            selectionNamespace: selectionNamespace,
+                            allowsHover: isInteractive,
+                            onSelect: {
+                                withAnimation(.bouncy(duration: 0.3)) { selectedDay = day }
+                            }
+                        )
                     }
                 }
             }
@@ -88,9 +90,9 @@ struct MonthGrid: View {
     }
 
     /// Up to three dots, one per calendar with events that day, in Calendar.app's colours.
-    private func dotColors(for day: Date) -> [Color] {
+    private func dotColors(for day: Date) -> [CGColor] {
         var seen = Set<String>()
-        var colors: [Color] = []
+        var colors: [CGColor] = []
         for event in eventsByDay[day]?.events ?? [] where seen.insert(event.calendarID).inserted {
             colors.append(event.color)
             if colors.count == 3 { break }
@@ -102,54 +104,67 @@ struct MonthGrid: View {
 private struct DayCell: View {
     @Environment(\.dismissMenu) private var dismissMenu
     let day: Date
+    let calendar: Calendar
     let isInMonth: Bool
     let isToday: Bool
     let isSelected: Bool
     let isDimmedWeekend: Bool
-    let dotColors: [Color]
-    let glassNamespace: Namespace.ID
+    let dotColors: [CGColor]
+    let selectionNamespace: Namespace.ID
+    let allowsHover: Bool
     let onSelect: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
-        VStack(spacing: 2) {
-            Text(day, format: .dateTime.day())
-                .font(.system(size: 12, weight: isToday ? .bold : .regular))
-                .monospacedDigit()
-                .foregroundStyle(foreground)
-                .frame(width: 26, height: 26)
-                .background {
-                    if isToday {
-                        Circle().fill(Color.accentColor)
-                    } else if isHovering && !isSelected {
-                        Circle().fill(.primary.opacity(0.08))
+        Button(action: onSelect) {
+            VStack(spacing: 2) {
+                Text(day, format: Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).day())
+                    .font(.system(size: 12, weight: isToday ? .bold : .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(foreground)
+                    .frame(width: 26, height: 26)
+                    .background {
+                        CalendarCellMark(
+                            shape: Circle(),
+                            isCurrent: isToday,
+                            isSelected: isSelected,
+                            isHovering: isHovering && allowsHover,
+                            namespace: selectionNamespace
+                        )
+                    }
+
+                HStack(spacing: 2) {
+                    ForEach(Array(dotColors.enumerated()), id: \.offset) { _, color in
+                        Circle().fill(Color(cgColor: color)).frame(width: 4, height: 4)
                     }
                 }
-                .modifier(SelectionGlass(isActive: isSelected && !isToday, namespace: glassNamespace))
-
-            HStack(spacing: 2) {
-                ForEach(Array(dotColors.enumerated()), id: \.offset) { _, color in
-                    Circle().fill(color).frame(width: 4, height: 4)
-                }
+                .frame(height: 4)
+                .opacity(isInMonth ? 1 : 0.4)
             }
-            .frame(height: 4)
-            .opacity(isInMonth ? 1 : 0.4)
+            .frame(width: MonthGrid.dayColumnWidth)
+            .padding(.vertical, 2)
+            .contentShape(.rect)
         }
-        .frame(width: MonthGrid.dayColumnWidth)
-        .padding(.vertical, 2)
-        .contentShape(.rect)
+        .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .simultaneousGesture(TapGesture().onEnded(onSelect))
-        .gesture(TapGesture(count: 2).onEnded {
+        // Hover isn't tracked while the pickers cover the grid; don't come
+        // back to a stale highlight.
+        .onChange(of: allowsHover) { isHovering = false }
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
             dismissMenu()
             CalendarApp.open()
         })
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(day, format: .dateTime.weekday(.wide).day().month(.wide).year()))
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(dotColors.isEmpty ? Text(verbatim: "") : Text("Has events"))
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction(.default, onSelect)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var accessibilityLabel: Text {
+        let date = day.formatted(
+            Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).weekday(.wide).day().month(.wide).year()
+        )
+        return isToday ? Text("Today, \(date)") : Text(verbatim: date)
     }
 
     private var foreground: AnyShapeStyle {
@@ -160,19 +175,25 @@ private struct DayCell: View {
     }
 }
 
-/// The Liquid Glass bubble behind the selected day. Sharing one glass ID lets
-/// the bubble morph from day to day as the selection moves.
-private struct SelectionGlass: ViewModifier {
-    let isActive: Bool
+/// The mark behind a day, month or year: the accent colour for today (or
+/// this month or year), a plain mark for the selection, as Calendar.app
+/// draws them, and a lighter one on hover. The selection mark slides from
+/// cell to cell as the selection moves.
+struct CalendarCellMark<S: Shape>: View {
+    let shape: S
+    let isCurrent: Bool
+    let isSelected: Bool
+    let isHovering: Bool
     let namespace: Namespace.ID
 
-    func body(content: Content) -> some View {
-        if isActive {
-            content
-                .glassEffect(.regular.interactive(), in: .circle)
-                .glassEffectID("selection", in: namespace)
-        } else {
-            content
+    var body: some View {
+        if isCurrent {
+            shape.fill(Color.accentColor)
+        } else if isSelected {
+            shape.fill(.primary.opacity(0.15))
+                .matchedGeometryEffect(id: "selection", in: namespace)
+        } else if isHovering {
+            shape.fill(.primary.opacity(0.08))
         }
     }
 }

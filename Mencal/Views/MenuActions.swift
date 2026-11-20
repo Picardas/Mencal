@@ -19,6 +19,24 @@ struct DaySelection {
     let events: DayEvents?
     /// The calendar view's width, which event titles are shortened to fit.
     let width: CGFloat
+
+    /// Today's finished events are "earlier"; other days show everything as
+    /// upcoming.
+    var split: (past: [CalendarEvent], upcoming: [CalendarEvent]) {
+        let events = events?.events ?? []
+        guard day == today else { return ([], events) }
+        return (events.filter { $0.end <= now }, events.filter { $0.end > now })
+    }
+
+    /// Whether this shows exactly the same menu items as `other`, so the
+    /// menu needn't rebuild them (and reset the highlight, close an open
+    /// submenu or shift rows under the pointer) after a sync that changed
+    /// nothing visible here.
+    func showsSameItems(as other: DaySelection) -> Bool {
+        day == other.day && today == other.today && width == other.width
+            && calendar == other.calendar && events == other.events
+            && split.past.count == other.split.past.count
+    }
 }
 
 /// Hands the selected day to StatusItemController, which supplies it

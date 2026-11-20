@@ -22,7 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsController = SettingsWindowController(ticker: ticker, store: store)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Unit tests run inside the app: give them no menu bar item and no
+        // calendar access.
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         // Nothing to save, so logout and restart needn't wait for Mencal.
+        // (Xcode doesn't emit the Info.plist key for this, so it's set here.)
         ProcessInfo.processInfo.enableSuddenTermination()
         NSApp.mainMenu = MainMenu.make()
         statusController = StatusItemController(ticker: ticker, store: store)

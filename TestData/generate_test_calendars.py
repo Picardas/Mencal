@@ -54,14 +54,15 @@ class Calendar:
         self.colour = colour
         self.events: list[list[str]] = []
 
-    def timed(self, title, day, start, end, *, location=None, rrule=None, notes=None, end_day=None):
-        """`start`/`end` are "HH:MM"; `end_day` defaults to `day`."""
+    def timed(self, title, day, start, end, *, location=None, rrule=None, notes=None, end_day=None, extra=()):
+        """`start`/`end` are "HH:MM"; `end_day` defaults to `day`. `extra`
+        holds further raw VEVENT lines (STATUS, ATTENDEE…)."""
         sh, sm = map(int, start.split(":"))
         eh, em = map(int, end.split(":"))
         begin = datetime(day.year, day.month, day.day, sh, sm)
         finish_day = end_day or day
         finish = datetime(finish_day.year, finish_day.month, finish_day.day, eh, em)
-        self._add(title, [f"DTSTART:{local(begin)}", f"DTEND:{local(finish)}"], location, rrule, notes)
+        self._add(title, [f"DTSTART:{local(begin)}", f"DTEND:{local(finish)}"], location, rrule, notes, extra)
 
     def utc(self, title, start: datetime, end: datetime, *, location=None, notes=None):
         fmt = "%Y%m%dT%H%M%SZ"
@@ -81,7 +82,7 @@ class Calendar:
             notes,
         )
 
-    def _add(self, title, times, location, rrule, notes):
+    def _add(self, title, times, location, rrule, notes, extra=()):
         lines = ["BEGIN:VEVENT", f"UID:{uuid.uuid4()}@mencal.test", f"DTSTAMP:{STAMP}"]
         if title is not None:
             lines.append(f"SUMMARY:{escape(title)}")
@@ -92,6 +93,7 @@ class Calendar:
             lines.append(f"LOCATION:{escape(location)}")
         if notes:
             lines.append(f"DESCRIPTION:{escape(notes)}")
+        lines += extra
         lines.append("END:VEVENT")
         self.events.append(lines)
 
@@ -193,7 +195,9 @@ def main(today: date):
 
     # 5. Hostile: what a spammy invitation or a broken feed might contain.
     #    Mencal must stay responsive and show the text as plain text.
-    hostile = Calendar("05-mencal-hostile.ics", "Mencal Test – Hostile", "#8E8E93")
+    #    The calendar's own name is hostile too (it shows in Settings).
+    hostile = Calendar("05-mencal-hostile.ics",
+                       "Mencal Test – Hostile \u202Edesrever\u202C " + "n" * 300, "#8E8E93")
     hostile.timed("Long title " + "x" * 20_000, d(1), "09:00", "10:00",
                   notes="20,000-character title.")
     hostile.timed("Z\u0337\u0353a\u0336\u0331l\u0334\u0359g\u0338\u0326o\u0335\u0354 text", d(1), "10:00", "10:30")
@@ -201,6 +205,18 @@ def main(today: date):
     hostile.timed("**Markdown** [link](https://example.com) %@ %n %s", d(1), "12:00", "12:30",
                   location="**bold** %@")
     hostile.timed("End before start", d(1), "15:00", "14:00")
+    hostile.timed("Heavy marks " + ("a" + "\u0301" * 2000) * 10, d(1), "16:00", "16:30",
+                  notes="20,000 combining accents stacked on ten letters.")
+    hostile.timed("Huge location", d(1), "17:00", "17:30", location="Room " + "y" * 10_000)
+    hostile.timed(" \t \u200B ", d(1), "18:00", "18:30", notes="Blank-looking title: shows as Untitled.")
+    hostile.timed(" " * 300 + "Leading spaces", d(1), "19:00", "19:30")
+    hostile.timed("Cancelled meeting (hidden)", d(2), "09:00", "10:00", extra=["STATUS:CANCELLED"])
+    hostile.timed("Declined invitation", d(2), "11:00", "12:00", extra=[
+        "ORGANIZER;CN=Organiser:mailto:organiser@example.com",
+        # Hidden only if this address is one of your own (System Settings ›
+        # Internet Accounts), as Calendar.app decides who "you" are.
+        "ATTENDEE;CN=You;PARTSTAT=DECLINED:mailto:you@example.com",
+    ])
     for n in range(1500):
         # Many overlapping multi-week events, as an invitation flood would add.
         hostile.all_day(f"Spam {n}", d(-14 + n % 7), d(14 + n % 7))

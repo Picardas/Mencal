@@ -1,20 +1,31 @@
 import Foundation
 
 /// One day's events, capped so a huge feed can't make the menu lay out
-/// thousands of rows. `count` is the full number.
-struct DayEvents {
-    private(set) var events: [CalendarEvent] = []
+/// thousands of rows. All-day and timed events are capped separately, so a
+/// flood of all-day spam can't push real meetings out. `count` is the full
+/// number.
+struct DayEvents: Equatable {
+    private(set) var allDay: [CalendarEvent] = []
+    private(set) var timed: [CalendarEvent] = []
     private(set) var count = 0
+
+    /// In display order: all-day first.
+    var events: [CalendarEvent] { allDay + timed }
 
     mutating func append(_ event: CalendarEvent, cap: Int) {
         count += 1
-        if events.count < cap { events.append(event) }
+        if event.isAllDay {
+            if allDay.count < cap { allDay.append(event) }
+        } else if timed.count < cap {
+            timed.append(event)
+        }
     }
 }
 
 /// The calendar's date logic, kept free of views so it can be tested.
 enum EventLayout {
-    /// Rows shown per day; the rest are a click away in Calendar.app.
+    /// Events kept per day, of each kind; the rest are a click away in
+    /// Calendar.app.
     static let maxEventsPerDay = 100
 
     /// The 42 days shown for `month`, each at the start of its day.
@@ -26,10 +37,7 @@ enum EventLayout {
         var day = calendar.startOfDay(for: gridStart)
         for _ in 0..<42 {
             days.append(day)
-            // A day's interval ends at the next day's start, even where
-            // midnight is skipped for daylight saving.
-            guard let next = calendar.dateInterval(of: .day, for: day)?.end else { break }
-            day = next
+            day = nextDay(after: day, calendar: calendar)
         }
         return days
     }
@@ -45,9 +53,20 @@ enum EventLayout {
         return regionCalendar.component(.weekOfYear, from: anchor)
     }
 
-    /// The start of the day after `day`.
+    /// The start of the day after `day` (a start of day). A day's interval
+    /// ends at the next day's start, even where midnight is skipped for
+    /// daylight saving.
     static func nextDay(after day: Date, calendar: Calendar) -> Date {
-        calendar.dateInterval(of: .day, for: day)?.end ?? day.addingTimeInterval(24 * 60 * 60)
+        if let end = calendar.dateInterval(of: .day, for: day)?.end,
+           end > day, end.timeIntervalSince(day) <= 26 * 60 * 60 {
+            return end
+        }
+        // Foundation gets some calendars' days wrong (the Indic lunisolar
+        // calendars report 720-hour days around some month changes). A day
+        // is the same in every calendar, so ask the Gregorian one.
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        return gregorian.dateInterval(of: .day, for: day)?.end ?? day.addingTimeInterval(24 * 60 * 60)
     }
 
     /// Groups `events` into the days they overlap. `dayStarts` must be
@@ -84,12 +103,15 @@ enum EventLayout {
     }
 
     /// Whole days from `from` to `to`, by calendar day rather than elapsed
-    /// time, so a 23-hour day (skipped midnight) still counts as one.
+    /// time, so a 23-hour day (skipped midnight) still counts as one. Counted
+    /// between the days' noons: midnight can be skipped or repeated, some
+    /// zones change their UTC offset at midnight, and days counted (unlike
+    /// positions within an era) carry on across an era change.
     static func dayOffset(from: Date, to: Date, calendar: Calendar) -> Int {
-        guard let a = calendar.ordinality(of: .day, in: .era, for: from),
-              let b = calendar.ordinality(of: .day, in: .era, for: to)
-        else { return 0 }
-        return b - a
+        func noon(_ date: Date) -> Date {
+            calendar.date(bySettingHour: 12, minute: 0, second: 0, of: calendar.startOfDay(for: date)) ?? date
+        }
+        return calendar.dateComponents([.day], from: noon(from), to: noon(to)).day ?? 0
     }
 
     /// The time line under an event's title, for the given day. Times use the
@@ -118,6 +140,8 @@ enum EventLayout {
         case (true, true):
             return String(localized: "All-day")
         case (true, false):
+            // Started on an earlier day and fills this one up to midnight.
+            if event.end == dayEnd { return String(localized: "All-day") }
             return String(localized: "Until \(event.end.formatted(time))")
         case (false, true):
             let ends = event.end.formatted(
