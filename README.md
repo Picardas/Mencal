@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/app-icon-dark.png">
-    <img src="docs/images/app-icon-light.png" width="128" alt="Mencal app icon">
-  </picture>
+  <img src="docs/images/app-icon.png" width="128" alt="Mencal app icon">
 </p>
 
 # Mencal
@@ -11,17 +8,11 @@ A Menubar Calendar for macOS
 Mencal puts today's date in the menu bar (e.g. `Thu 19 Nov`) in the standard menu bar font. Click it for a menu with a month calendar and the selected day's events, in your Calendar.app colours.
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/menu-bar-dark.png">
-    <img src="docs/images/menu-bar-light.png" width="186" alt="Mencal's date in the menu bar, beside Control Center and the clock">
-  </picture>
+  <img src="docs/images/menu-bar.png" width="186" alt="Mencal's date in the menu bar, beside Control Center and the clock">
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/calendar-menu-dark.png">
-    <img src="docs/images/calendar-menu-light.png" width="305" alt="Mencal's menu: a month calendar with today's events as menu items">
-  </picture>
+  <img src="docs/images/calendar-menu.png" width="305" alt="Mencal's menu: a month calendar with today's events as menu items">
 </p>
 
 ## Features
