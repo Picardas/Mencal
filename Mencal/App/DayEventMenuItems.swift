@@ -2,7 +2,7 @@ import AppKit
 
 /// Builds the selected day's events as standard menu items: a section
 /// header, one item per event (title, a time and location subtitle, and a
-/// dot in the calendar's colour). Today's finished events, and events that
+/// bar in the calendar's colour beside them, as Calendar.app marks events). Today's finished events, and events that
 /// don't fit, are in submenus, which are filled when opened and scroll on
 /// their own if they need to.
 @MainActor
@@ -33,8 +33,8 @@ enum DayEventMenuItems {
             item.representedObject = event
             let time = EventLayout.timeText(for: event, on: selection.day, calendar: selection.calendar)
             item.subtitle = fitter.subtitle([time, event.location].compactMap(\.self).joined(separator: " · "))
-            item.image = dotImage(event.color, description: event.calendarTitle)
-            // From macOS 27, menus hide item images unless asked; the dot
+            item.image = barImage(event.color, description: event.calendarTitle)
+            // From macOS 27, menus hide item images unless asked; the bar
             // carries the calendar's colour, so it's always shown.
             if #available(macOS 27, *) {
                 item.preferredImageVisibility = .visible
@@ -105,12 +105,24 @@ enum DayEventMenuItems {
     }()
 
     /// A small filled circle in the calendar's colour, like Calendar.app's.
-    private static func dotImage(_ color: CGColor, description: String) -> NSImage? {
-        let configuration = NSImage.SymbolConfiguration(pointSize: 8, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(cgColor: color) ?? .controlAccentColor]))
-        return NSImage(systemSymbolName: "circle.fill", accessibilityDescription: description)?
-            .withSymbolConfiguration(configuration)
+    /// A rounded bar in the calendar's colour, as tall as an item's title
+    /// and subtitle, so it runs the length of the event like Calendar.app's.
+    private static func barImage(_ color: CGColor, description: String) -> NSImage {
+        let image = NSImage(size: barSize, flipped: false) { rect in
+            (NSColor(cgColor: color) ?? .controlAccentColor).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: rect.width / 2, yRadius: rect.width / 2).fill()
+            return true
+        }
+        image.accessibilityDescription = description
+        return image
     }
+
+    /// The two text lines' height, so the bar doesn't make items taller.
+    private static let barSize: NSSize = {
+        func lineHeight(_ font: NSFont) -> CGFloat { ceil(font.ascender - font.descender + font.leading) }
+        let height = lineHeight(.menuFont(ofSize: 0)) + lineHeight(.menuFont(ofSize: NSFont.smallSystemFontSize))
+        return NSSize(width: 3, height: height - 2)
+    }()
 }
 
 /// A submenu whose items are built when it's about to open, so a day with a
