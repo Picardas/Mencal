@@ -1,29 +1,32 @@
 import SwiftUI
 
-/// The calendar at the top of Mencal's menu: a month grid with the selected
-/// day's events underneath.
+/// The calendar at the top of Mencal's menu: a month grid. The selected
+/// day's events are native menu items below it, which StatusItemController
+/// builds from what this view publishes. It's built fresh for each opening,
+/// so its state always starts from today.
 struct CalendarMenuView: View {
     @Environment(DateTicker.self) private var ticker
     @Environment(CalendarStore.self) private var store
-    @Environment(MenuState.self) private var menu
+    @Environment(\.showDayEvents) private var showDayEvents
 
     @AppStorage(PrefKey.showWeekNumbers) private var showWeekNumbers = PrefDefault.showWeekNumbers
     @AppStorage(PrefKey.firstWeekday) private var firstWeekday = PrefDefault.firstWeekday
     @AppStorage(PrefKey.dimWeekends) private var dimWeekends = PrefDefault.dimWeekends
     @AppStorage(PrefKey.showAllDayEvents) private var showAllDayEvents = PrefDefault.showAllDayEvents
-    @AppStorage(PrefKey.rememberPastEvents) private var rememberPastEvents = PrefDefault.rememberPastEvents
-    @AppStorage(PrefKey.showPastEvents) private var savedShowPastEvents = PrefDefault.showPastEvents
 
     @State private var displayedMonth = Date()
     @State private var selectedDay = Calendar.autoupdatingCurrent.startOfDay(for: Date())
-    @State private var eventsByDay: [Date: [CalendarEvent]] = [:]
-    @State private var sizingDays: [[CalendarEvent]] = []
+    @State private var eventsByDay: [Date: DayEvents] = [:]
+    /// The data the shown events were read with.
+    @State private var loadedKey: FetchKey?
     @State private var monthDirection: Edge = .trailing
-    @State private var showPastEvents = false
-    @State private var lastFetch = FetchMemo()
 
     private static let monthAnimation = Animation.snappy(duration: 0.28)
 
+    private static let horizontalPadding: CGFloat = 14
+    private var width: CGFloat {
+        MonthGrid.width(showWeekNumbers: showWeekNumbers) + Self.horizontalPadding * 2
+    }
     private var calendar: Calendar { .mencal(firstWeekday: firstWeekday) }
     private var today: Date { calendar.startOfDay(for: ticker.now) }
 
@@ -39,7 +42,7 @@ struct CalendarMenuView: View {
             )
 
             // The ZStack keeps the outgoing and incoming grids in one slot
-            // during the push, so the list below doesn't move.
+            // during the push.
             ZStack {
                 MonthGrid(
                     calendar: calendar,
@@ -55,43 +58,32 @@ struct CalendarMenuView: View {
             }
             .clipped()
 
-            Divider()
-
-            if store.access == .granted {
-                DayEventList(
-                    day: selectedDay,
-                    today: today,
-                    now: ticker.now,
-                    calendar: calendar,
-                    events: eventsByDay[selectedDay] ?? [],
-                    sizingDays: sizingDays,
-                    showPastEvents: $showPastEvents
-                )
-            } else {
+            if store.access != .granted {
+                Divider()
                 AccessPrompt()
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Self.horizontalPadding)
         .padding(.top, 10)
         .padding(.bottom, 6)
-        .frame(width: showWeekNumbers ? 316 : 296)
+        .frame(width: width)
         // While the menu is open its height is held; keep the content pinned
         // to the top rather than centred if it would be shorter.
         .frame(maxHeight: .infinity, alignment: .top)
         .clipped()
-        .onChange(of: menu.isOpen, initial: true) { _, isOpen in
-            if isOpen {
-                showPastEvents = rememberPastEvents && savedShowPastEvents
-                jumpToToday(animated: false)
-                reloadEvents()
-            } else {
-                // The next opening always reads fresh data.
-                lastFetch.key = nil
-            }
-        }
         .onChange(of: today) { jumpToToday(animated: false) }
-        .onChange(of: showPastEvents) { savedShowPastEvents = showPastEvents }
-        .onChange(of: fetchKey) { reloadEvents() }
+        // Runs on the first layout, before the menu measures its items.
+        .onChange(of: fetchKey, initial: true) { reloadEvents() }
+        // A new day in the same grid needs no fetch. When a fetch is due
+        // (the day left the grid, or the month changed with it), the reload
+        // publishes instead, so the items aren't built from stale events.
+        .onChange(of: selectedDay) {
+            if fetchKey == loadedKey { publishSelectedDay() }
+        }
+        // Which of today's events are finished.
+        .onChange(of: ticker.now) {
+            if fetchKey == loadedKey { publishSelectedDay() }
+        }
     }
 
     // MARK: - Navigation
@@ -124,80 +116,59 @@ struct CalendarMenuView: View {
         var showAllDayEvents: Bool
     }
 
-    /// The last fetch, kept out of SwiftUI's observation so updating it
-    /// doesn't re-render.
-    private final class FetchMemo {
-        var key: FetchKey?
-    }
-
     private var fetchKey: FetchKey? {
-        let days = MonthGrid.days(for: displayedMonth, calendar: calendar)
-        guard let first = days.first,
-              let last = days.last,
-              let end = calendar.date(byAdding: .day, value: 1, to: last).map(calendar.startOfDay)
-        else { return nil }
+        let days = EventLayout.gridDays(for: displayedMonth, calendar: calendar)
+        guard let first = days.first, let last = days.last else { return nil }
+        let end = EventLayout.nextDay(after: last, calendar: calendar)
         let isInGrid = selectedDay >= first && selectedDay < end
         return FetchKey(
             grid: DateInterval(start: first, end: end),
             extraDay: isInGrid ? nil : selectedDay,
-            // Depend on calendar changes only while open, so a sync doesn't
-            // re-render the closed menu.
-            revision: menu.isOpen ? store.revision : 0,
+            revision: store.revision,
             showAllDayEvents: showAllDayEvents
         )
     }
 
-    private struct SizingCandidate {
-        let day: Date
-        let events: [CalendarEvent]
-        let estimate: Double
-    }
-
-    /// A rough relative height for a day's list: one per row, plus extra
-    /// for a location line or a title likely to wrap. Only used to pick
-    /// candidates; the real height is measured.
-    private static func estimatedHeight(of events: [CalendarEvent]) -> Double {
-        events.prefix(8).reduce(0) { total, event in
-            total + 1 + (event.location == nil ? 0 : 0.35) + (event.title.count > 32 ? 0.4 : 0)
-        }
-    }
-
-    /// Groups the shown events by day. Runs only while the menu is open, and
-    /// only queries EventKit when something the events depend on changed.
+    /// Reads the grid's events and groups them by day.
     private func reloadEvents() {
-        guard menu.isOpen, let key = fetchKey, key != lastFetch.key else { return }
-        lastFetch.key = key
+        guard let key = fetchKey else { return }
+        let days = EventLayout.gridDays(for: displayedMonth, calendar: calendar)
+        var buckets = EventLayout.group(shownEvents(in: key.grid), dayStarts: days, end: key.grid.end)
 
-        var intervals = [key.grid]
-        if let extraDay = key.extraDay,
-           let next = calendar.date(byAdding: .day, value: 1, to: extraDay).map(calendar.startOfDay) {
-            intervals.append(DateInterval(start: extraDay, end: next))
-        }
-
-        var buckets: [Date: [CalendarEvent]] = [:]
-        for interval in intervals {
-            for event in store.events(in: interval) where showAllDayEvents || !event.isAllDayOrMultiDay {
-                var day = calendar.startOfDay(for: max(event.start, interval.start))
-                let limit = min(event.end, interval.end)
-                repeat {
-                    buckets[day, default: []].append(event)
-                    guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
-                    // startOfDay: after a skipped midnight, +1 day keeps 01:00.
-                    day = calendar.startOfDay(for: next)
-                } while day < limit
+        // A selected day outside the grid keeps the events already read for
+        // it, unless the data or filter changed since.
+        if let extraDay = key.extraDay {
+            let isSameData = loadedKey?.revision == key.revision
+                && loadedKey?.showAllDayEvents == key.showAllDayEvents
+            if isSameData, let kept = eventsByDay[extraDay] {
+                buckets[extraDay] = kept
+            } else {
+                let next = EventLayout.nextDay(after: extraDay, calendar: calendar)
+                let day = DateInterval(start: extraDay, end: next)
+                buckets.merge(EventLayout.group(shownEvents(in: day), dayStarts: [extraDay], end: next)) { $1 }
             }
         }
+
         eventsByDay = buckets
-        // The shown month's tallest-looking days. Rows differ in height (a
-        // location line, two-line titles), so a rough estimate shortlists a
-        // few and the list measures them exactly. Ties go to the earliest
-        // day, so the choice (and the menu's height) is the same every time.
-        var candidates: [SizingCandidate] = []
-        for (day, events) in buckets where calendar.isDate(day, equalTo: displayedMonth, toGranularity: .month) {
-            candidates.append(SizingCandidate(day: day, events: events, estimate: Self.estimatedHeight(of: events)))
-        }
-        candidates.sort { $0.estimate != $1.estimate ? $0.estimate > $1.estimate : $0.day < $1.day }
-        sizingDays = candidates.prefix(3).map(\.events)
+        loadedKey = key
+        publishSelectedDay(from: buckets)
+    }
+
+    /// Hands the selected day's events to the menu. `buckets` is passed
+    /// right after a reload, rather than read back from state.
+    private func publishSelectedDay(from buckets: [Date: DayEvents]? = nil) {
+        showDayEvents(DaySelection(
+            day: selectedDay,
+            today: today,
+            now: ticker.now,
+            calendar: calendar,
+            events: store.access == .granted ? (buckets ?? eventsByDay)[selectedDay] ?? DayEvents() : nil,
+            width: width
+        ))
+    }
+
+    private func shownEvents(in interval: DateInterval) -> [CalendarEvent] {
+        store.events(in: interval).filter { showAllDayEvents || !$0.isAllDayOrMultiDay }
     }
 }
 
@@ -248,7 +219,7 @@ private struct MonthHeader: View {
 
 private struct AccessPrompt: View {
     @Environment(CalendarStore.self) private var store
-    @Environment(MenuState.self) private var menu
+    @Environment(\.dismissMenu) private var dismissMenu
 
     var body: some View {
         VStack(spacing: 8) {
@@ -271,13 +242,13 @@ private struct AccessPrompt: View {
             Group {
                 if store.access == .denied {
                     Button("Open Privacy Settings") {
-                        menu.dismiss()
+                        dismissMenu()
                         SystemSettings.openCalendarPrivacy()
                     }
                 } else {
                     Button("Allow Calendar Access") {
                         // Close the menu first so the permission prompt isn't behind it.
-                        menu.dismiss()
+                        dismissMenu()
                         NSApp.activate()
                         store.requestAccess()
                     }

@@ -191,7 +191,21 @@ def main(today: date):
     edge.all_day("Two-week project", d(-10), d(3))
     edge.all_day("New Year's Day", date(today.year + 1, 1, 1))
 
-    for calendar in (work, personal, busy, edge):
+    # 5. Hostile: what a spammy invitation or a broken feed might contain.
+    #    Mencal must stay responsive and show the text as plain text.
+    hostile = Calendar("05-mencal-hostile.ics", "Mencal Test – Hostile", "#8E8E93")
+    hostile.timed("Long title " + "x" * 20_000, d(1), "09:00", "10:00",
+                  notes="20,000-character title.")
+    hostile.timed("Z\u0337\u0353a\u0336\u0331l\u0334\u0359g\u0338\u0326o\u0335\u0354 text", d(1), "10:00", "10:30")
+    hostile.timed("Right-to-left \u202Eoverride\u202C in title", d(1), "11:00", "11:30")
+    hostile.timed("**Markdown** [link](https://example.com) %@ %n %s", d(1), "12:00", "12:30",
+                  location="**bold** %@")
+    hostile.timed("End before start", d(1), "15:00", "14:00")
+    for n in range(1500):
+        # Many overlapping multi-week events, as an invitation flood would add.
+        hostile.all_day(f"Spam {n}", d(-14 + n % 7), d(14 + n % 7))
+
+    for calendar in (work, personal, busy, edge, hostile):
         path, count = calendar.write()
         print(f"{path.name}: {count} events")
 

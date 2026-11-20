@@ -31,6 +31,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showSettings(_ sender: Any?) {
         settingsController.show()
     }
+
+    /// Opening Mencal again (Finder, Spotlight, the Dock) shows Settings, so
+    /// it's reachable even if the menu bar item is hidden (by the notch, or
+    /// the System Settings › Menu Bar switch).
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showSettings(nil) }
+        return true
+    }
 }
 
 /// Menu-bar-only apps never show a main menu, but its key equivalents still

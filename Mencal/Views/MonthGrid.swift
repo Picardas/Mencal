@@ -1,28 +1,26 @@
 import SwiftUI
 
 /// A six-week month grid. Weekday symbols, numerals and week numbers come
-/// from the region; the first weekday can be overridden in Settings.
+/// from the region; the first weekday can be overridden in Settings, and week
+/// numbers still follow the region's own weeks.
 struct MonthGrid: View {
     let calendar: Calendar
     let month: Date
     let today: Date
     @Binding var selectedDay: Date
-    let eventsByDay: [Date: [CalendarEvent]]
+    let eventsByDay: [Date: DayEvents]
     let showWeekNumbers: Bool
     let dimWeekends: Bool
 
     @Namespace private var glassNamespace
 
-    /// The 42 days shown for `month`, each at the start of its day.
-    static func days(for month: Date, calendar: Calendar) -> [Date] {
-        guard let monthStart = calendar.dateInterval(of: .month, for: month)?.start,
-              let gridStart = calendar.dateInterval(of: .weekOfYear, for: monthStart)?.start
-        else { return [] }
-        // startOfDay: where midnight is skipped for daylight saving, adding
-        // days would otherwise land on 01:00.
-        return (0..<42).compactMap {
-            calendar.date(byAdding: .day, value: $0, to: gridStart).map(calendar.startOfDay)
-        }
+    /// Fixed column widths, so the grid is the same with or without week
+    /// numbers and its parent sizes to it, with even margins either side.
+    static let dayColumnWidth: CGFloat = 38
+    static let weekColumnWidth: CGFloat = 22
+
+    static func width(showWeekNumbers: Bool) -> CGFloat {
+        dayColumnWidth * 7 + (showWeekNumbers ? weekColumnWidth : 0)
     }
 
     private var weekdaySymbols: [String] {
@@ -32,7 +30,7 @@ struct MonthGrid: View {
     }
 
     var body: some View {
-        let days = Self.days(for: month, calendar: calendar)
+        let days = EventLayout.gridDays(for: month, calendar: calendar)
         let weeks = days.count / 7
         // Weekend days come from the region (e.g. Fri/Sat in some locales).
         let weekendColumns = (0..<7).map { days.indices.contains($0) && calendar.isDateInWeekend(days[$0]) }
@@ -48,7 +46,7 @@ struct MonthGrid: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(dimWeekends && weekendColumns[column]
                                              ? HierarchicalShapeStyle.secondary : .primary)
-                            .frame(maxWidth: .infinity)
+                            .frame(width: Self.dayColumnWidth)
                             .padding(.vertical, 4)
                     }
                 }
@@ -56,11 +54,17 @@ struct MonthGrid: View {
                 ForEach(0..<weeks, id: \.self) { week in
                     GridRow {
                         if showWeekNumbers {
-                            Text(calendar.component(.weekOfYear, from: days[week * 7]), format: .number)
+                            Text(
+                                EventLayout.weekNumber(
+                                    ofRow: days[(week * 7)..<(week * 7 + 7)],
+                                    regionCalendar: .autoupdatingCurrent
+                                ) ?? 0,
+                                format: .number
+                            )
                                 .font(.caption2)
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
-                                .frame(width: 20)
+                                .frame(width: Self.weekColumnWidth, alignment: .leading)
                         }
                         ForEach(0..<7, id: \.self) { column in
                             let day = days[week * 7 + column]
@@ -87,7 +91,7 @@ struct MonthGrid: View {
     private func dotColors(for day: Date) -> [Color] {
         var seen = Set<String>()
         var colors: [Color] = []
-        for event in eventsByDay[day] ?? [] where seen.insert(event.calendarID).inserted {
+        for event in eventsByDay[day]?.events ?? [] where seen.insert(event.calendarID).inserted {
             colors.append(event.color)
             if colors.count == 3 { break }
         }
@@ -96,7 +100,7 @@ struct MonthGrid: View {
 }
 
 private struct DayCell: View {
-    @Environment(MenuState.self) private var menu
+    @Environment(\.dismissMenu) private var dismissMenu
     let day: Date
     let isInMonth: Bool
     let isToday: Bool
@@ -132,15 +136,13 @@ private struct DayCell: View {
             .frame(height: 4)
             .opacity(isInMonth ? 1 : 0.4)
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: MonthGrid.dayColumnWidth)
         .padding(.vertical, 2)
         .contentShape(.rect)
         .onHover { isHovering = $0 }
-        // A closing menu sends no hover-exit, so clear it explicitly.
-        .onChange(of: menu.isOpen) { isHovering = false }
         .simultaneousGesture(TapGesture().onEnded(onSelect))
         .gesture(TapGesture(count: 2).onEnded {
-            menu.dismiss()
+            dismissMenu()
             CalendarApp.open()
         })
         .accessibilityElement(children: .ignore)

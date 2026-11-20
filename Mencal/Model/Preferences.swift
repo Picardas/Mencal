@@ -13,10 +13,6 @@ enum PrefKey {
     static let firstWeekday = "calendar.firstWeekday"
     static let dimWeekends = "calendar.dimWeekends"
     static let showAllDayEvents = "calendar.showAllDayEvents"
-    /// Restore the last earlier-events choice on open, instead of hiding them.
-    static let rememberPastEvents = "calendar.rememberPastEvents"
-    /// The last earlier-events choice.
-    static let showPastEvents = "calendar.showPastEvents"
     static let hiddenCalendarIDs = "calendar.hiddenCalendarIDs"
 }
 
@@ -24,17 +20,13 @@ enum PrefKey {
 /// reads them. Menu bar defaults are `MenuBarFormat.standard`.
 enum PrefDefault {
     static let showWeekNumbers = false
-    static let firstWeekday = Calendar.regionFirstWeekday
+    /// 0 follows the region; 1–7 is Sunday–Saturday.
+    static let firstWeekday = 0
     static let dimWeekends = true
     static let showAllDayEvents = true
-    static let rememberPastEvents = false
-    static let showPastEvents = false
 }
 
 extension Calendar {
-    /// The first-weekday setting's value for "follow the region".
-    static let regionFirstWeekday = 0
-
     /// The user's calendar, with the first weekday overridden if set (1–7).
     static func mencal(firstWeekday: Int) -> Calendar {
         var calendar = Calendar.autoupdatingCurrent
