@@ -1,7 +1,7 @@
 import ServiceManagement
 import SwiftUI
 
-// The settings tabs, hosted by SettingsWindowController.
+// The settings window's tabs, hosted by SettingsWindowController.
 
 // MARK: - General
 
@@ -22,6 +22,8 @@ struct GeneralSettings: View {
                         Text(loginItemNote)
                     }
                 }
+                // Can always be switched off, but only on from Applications.
+                .disabled(!launchAtLogin && !Self.isInApplicationsFolder)
                 .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
             }
 
@@ -49,6 +51,20 @@ struct GeneralSettings: View {
         .fixedSize(horizontal: false, vertical: true)
         // The login item can also be changed in System Settings.
         .onAppear { syncLoginItem() }
+    }
+
+    /// A login item opens whichever copy registered it, so only offer it when
+    /// this copy is installed in /Applications or ~/Applications (including
+    /// subfolders), not in Downloads, DerivedData or a disk image.
+    private static var isInApplicationsFolder: Bool {
+        let path = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+        var folders = ["/Applications/"]
+        // Inside the sandbox NSHomeDirectory() is the container, so ask for
+        // the account's real home folder.
+        if let account = getpwuid(getuid()) {
+            folders.append(String(cString: account.pointee.pw_dir) + "/Applications/")
+        }
+        return folders.contains { path.hasPrefix($0) }
     }
 
     /// On means registered, including while waiting for the user's approval,
@@ -86,9 +102,13 @@ struct GeneralSettings: View {
     private func syncLoginItem() {
         let status = SMAppService.mainApp.status
         launchAtLogin = Self.isRegistered(status)
-        loginItemNote = status == .requiresApproval
-            ? String(localized: "Waiting for approval in System Settings › General › Login Items.")
-            : nil
+        if status == .requiresApproval {
+            loginItemNote = String(localized: "Waiting for approval in System Settings › General › Login Items.")
+        } else if !launchAtLogin && !Self.isInApplicationsFolder {
+            loginItemNote = String(localized: "Move Mencal to the Applications folder to open it at login.")
+        } else {
+            loginItemNote = nil
+        }
     }
 }
 
@@ -180,7 +200,7 @@ struct CalendarSettings: View {
         Form {
             Section("Display") {
                 Picker("Week starts on", selection: $firstWeekday) {
-                    Text("Region Default (\(regionWeekdayName))").tag(Calendar.regionFirstWeekday)
+                    Text("Region Default (\(regionWeekdayName))").tag(PrefDefault.firstWeekday)
                     Divider()
                     ForEach(1...7, id: \.self) { weekday in
                         Text(Calendar.autoupdatingCurrent.standaloneWeekdaySymbols[weekday - 1]).tag(weekday)

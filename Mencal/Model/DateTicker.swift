@@ -9,26 +9,26 @@ import Observation
 final class DateTicker {
     private(set) var now = Date()
 
+    @ObservationIgnored private var observations: [NotificationCenter.ObservationToken] = []
+
     init() {
-        let names: [Notification.Name] = [
-            .NSCalendarDayChanged,
-            .NSSystemClockDidChange,
-            .NSSystemTimeZoneDidChange,
-            NSLocale.currentLocaleDidChangeNotification,
+        let center = NotificationCenter.default
+        observations = [
+            center.addObserver(of: Date.self, for: .systemClockDidChange) { [weak self] _ in self?.refresh() },
+            center.addObserver(of: TimeZone.self, for: .systemTimeZoneDidChange) { [weak self] _ in self?.refresh() },
+            center.addObserver(of: Locale.self, for: .currentLocaleDidChange) { [weak self] _ in self?.refresh() },
+            NSWorkspace.shared.notificationCenter.addObserver(of: NSWorkspace.shared, for: .didWake) { [weak self] _ in
+                self?.refresh()
+            },
         ]
-        for name in names {
-            observe(name, on: .default)
+        // The day change is an asynchronous message; this task runs on the
+        // main actor and lives as long as the app.
+        Task { [weak self] in
+            for await _ in center.messages(of: Calendar.self, for: .calendarDayChanged) { self?.refresh() }
         }
-        observe(NSWorkspace.didWakeNotification, on: NSWorkspace.shared.notificationCenter)
     }
 
     func refresh() {
         now = Date()
-    }
-
-    private func observe(_ name: Notification.Name, on center: NotificationCenter) {
-        _ = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
-        }
     }
 }

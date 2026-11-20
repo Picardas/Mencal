@@ -4,7 +4,7 @@ import Observation
 import SwiftUI
 
 /// One calendar, as listed in Settings.
-struct CalendarInfo: Identifiable {
+nonisolated struct CalendarInfo: Identifiable, Sendable {
     let id: String
     let title: String
     let account: String
@@ -60,14 +60,14 @@ final class CalendarStore {
         }
     }
 
-    private let store = EKEventStore()
+    private let eventStore = EKEventStore()
 
     init() {
         hiddenCalendarIDs = Set(UserDefaults.standard.stringArray(forKey: PrefKey.hiddenCalendarIDs) ?? [])
         access = Self.currentAccess()
         _ = NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged,
-            object: store,
+            object: eventStore,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.revision += 1 }
@@ -76,8 +76,9 @@ final class CalendarStore {
 
     /// Reading events needs "Full Access"; macOS has no read-only level.
     func requestAccess() {
-        store.requestFullAccessToEvents { [weak self] _, _ in
-            Task { @MainActor in self?.refreshAccess() }
+        Task {
+            _ = try? await eventStore.requestFullAccessToEvents()
+            refreshAccess()
         }
     }
 
@@ -87,7 +88,7 @@ final class CalendarStore {
         guard newAccess != access else { return }
         access = newAccess
         // A store created before access was granted must be reset to see data.
-        if access == .granted { store.reset() }
+        if access == .granted { eventStore.reset() }
         revision += 1
     }
 
@@ -95,28 +96,27 @@ final class CalendarStore {
     var calendars: [CalendarInfo] {
         _ = revision // Observed, so views re-read after changes.
         guard access == .granted else { return [] }
-        return store.calendars(for: .event)
+        return eventStore.calendars(for: .event)
             .map { CalendarInfo(
                 id: $0.calendarIdentifier,
                 title: $0.title,
                 account: $0.source?.title ?? "",
                 color: Color(nsColor: $0.color ?? .controlAccentColor)
             ) }
-            .sorted {
-                $0.account == $1.account
-                    ? $0.title.localizedStandardCompare($1.title) == .orderedAscending
-                    : $0.account.localizedStandardCompare($1.account) == .orderedAscending
-            }
+            .sorted(using: [
+                SortDescriptor(\.account, comparator: .localizedStandard),
+                SortDescriptor(\.title, comparator: .localizedStandard),
+            ])
     }
 
     /// Visible event occurrences overlapping `interval`, in display order.
     func events(in interval: DateInterval) -> [CalendarEvent] {
         guard access == .granted else { return [] }
-        let visible = store.calendars(for: .event).filter { !hiddenCalendarIDs.contains($0.calendarIdentifier) }
+        let visible = eventStore.calendars(for: .event).filter { !hiddenCalendarIDs.contains($0.calendarIdentifier) }
         guard !visible.isEmpty else { return [] }
 
-        let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: visible)
-        return store.events(matching: predicate)
+        let predicate = eventStore.predicateForEvents(withStart: interval.start, end: interval.end, calendars: visible)
+        return eventStore.events(matching: predicate)
             .compactMap { event in
                 // EventKit's properties are implicitly unwrapped; skip items
                 // caught mid-sync rather than crash.

@@ -2,26 +2,12 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Shared between the status item and the SwiftUI calendar in its menu.
-@Observable
-final class MenuState {
-    /// True from preparing the menu until it closes. The calendar resets to
-    /// today when built and only fetches events while this is true.
-    fileprivate(set) var isOpen = false
-
-    @ObservationIgnored fileprivate var close: () -> Void = {}
-
-    /// Closes the menu, e.g. before handing off to Calendar.app.
-    func dismiss() { close() }
-}
-
 /// The menu bar item: the date as its title, and a standard `NSMenu` whose
 /// first item hosts the SwiftUI calendar. Being a real menu, macOS draws,
 /// positions and tracks it like its own menu bar menus.
 final class StatusItemController: NSObject, NSMenuDelegate {
     private let ticker: DateTicker
     private let store: CalendarStore
-    private let menuState = MenuState()
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
@@ -37,7 +23,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         self.store = store
         super.init()
 
-        menuState.close = { [weak self] in self?.menu.cancelTracking() }
         buildMenu()
         statusItem.autosaveName = "MencalDate"
         statusItem.menu = menu
@@ -96,10 +81,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func prepareCalendar() {
         store.refreshAccess()
         ticker.refresh()
-        menuState.isOpen = true
+        let dismiss = DismissMenuAction { [weak self] in self?.menu.cancelTracking() }
         let view = NSHostingView(rootView: CalendarMenuView()
-            .environment(ticker).environment(store).environment(menuState))
-        // Lay out first so the initial onChange (reset, fetch) has run, then
+            .environment(ticker).environment(store).environment(\.dismissMenu, dismiss))
+        // Lay out first so the initial onChange (the fetch) has run, then
         // measure. Only then stop the view from resizing itself: with no
         // sizing options, fittingSize would be zero.
         view.layoutSubtreeIfNeeded()
@@ -108,6 +93,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         view.setFrameSize(size)
         calendarItem.view = view
         preparedAt = Date()
+        // If this preparation isn't followed by an opening (an accessibility
+        // client reading the menu, say), drop the view. Default run-loop mode
+        // doesn't run while a menu is tracking, so an opening goes first.
+        perform(#selector(discardIfNotOpened), with: nil, afterDelay: 0, inModes: [.default])
+    }
+
+    @objc private func discardIfNotOpened() {
+        guard !isTracking else { return }
+        calendarItem.view = nil
+        preparedAt = .distantPast
     }
 
     /// The menu has no key equivalents, so key presses never need to search
@@ -123,7 +118,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuDidClose(_ menu: NSMenu) {
         isTracking = false
         preparedAt = .distantPast
-        menuState.isOpen = false
         // Release the view while closed, but not mid-action: closing can be
         // triggered by one of its own buttons.
         DispatchQueue.main.async { [weak self] in

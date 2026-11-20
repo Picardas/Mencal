@@ -6,28 +6,23 @@ struct DayEventList: View {
     let today: Date
     let now: Date
     let calendar: Calendar
-    let events: [CalendarEvent]
-    /// The shown month's tallest-looking days. Laid out invisibly so the
-    /// menu opens tall enough for any day that month (up to the maximum).
+    let dayEvents: DayEvents
+    /// A few of the month's tallest-looking days, laid out invisibly so the
+    /// menu opens tall enough for them (up to the maximum).
     let sizingDays: [[CalendarEvent]]
 
     /// Whether today's finished events are shown. CalendarMenuView sets it
     /// each time the menu opens.
     @Binding var showPastEvents: Bool
 
-    @Environment(MenuState.self) private var menu
+    @Environment(\.dismissMenu) private var dismissMenu
 
     /// The list fits its content between these heights; about five events
     /// fit at the maximum, more scroll.
     private static let minListHeight: CGFloat = 60
     private static let maxListHeight: CGFloat = 270
 
-    /// A huge feed can't make the menu lay out thousands of rows; the rest
-    /// are a click away in Calendar.app.
-    private static let maxRows = 100
-
-    /// Enough rows to pass `maxListHeight`; more would be laid out for nothing.
-    private static let maxSizingRows = 8
+    private var events: [CalendarEvent] { dayEvents.events }
 
     /// Only today hides finished events; other days show everything.
     private var pastEvents: [CalendarEvent] {
@@ -54,14 +49,15 @@ struct DayEventList: View {
             }
             .padding(.horizontal, 4)
 
-            // When the menu opens, the list is as tall as the taller of this
-            // day and the month's busiest day, between the min and max. An
-            // open menu can't resize, so while open it keeps that height and
-            // scrolls if needed.
+            // When the menu opens, the list is as tall as the tallest of this
+            // day and the sizing days, between the min and max. An open menu
+            // can't resize, so while open it keeps that height and scrolls.
             ZStack(alignment: .top) {
-                // The ZStack takes the tallest of these.
                 ForEach(sizingDays.indices, id: \.self) { index in
-                    eventRows(Array(sizingDays[index].prefix(Self.maxSizingRows)))
+                    sizingRows(sizingDays[index])
+                        // Capped and top-aligned, so a tall sizing day can't
+                        // push the real list out of its frame.
+                        .frame(maxHeight: Self.maxListHeight, alignment: .top)
                         .hidden()
                         .accessibilityHidden(true)
                 }
@@ -73,7 +69,7 @@ struct DayEventList: View {
                         }
 
                         if visibleEvents.isEmpty {
-                            Text(events.isEmpty ? "No Events" : "No More Events Today")
+                            Text(events.isEmpty ? "No events" : "No more events today")
                                 .font(.callout)
                                 .foregroundStyle(.tertiary)
                                 .frame(maxWidth: .infinity, minHeight: Self.minListHeight)
@@ -83,20 +79,27 @@ struct DayEventList: View {
                     }
                 }
                 .scrollBounceBehavior(.basedOnSize)
+                // Each day starts scrolled to the top.
+                .id(day)
             }
             .frame(minHeight: Self.minListHeight, maxHeight: Self.maxListHeight)
             .clipped()
-            // Each day starts scrolled to the top.
-            .id(day)
         }
     }
 
     private var rows: some View {
         VStack(spacing: 2) {
-            eventRows(Array(visibleEvents.prefix(Self.maxRows)))
-            if visibleEvents.count > Self.maxRows {
-                Button("^[\(visibleEvents.count - Self.maxRows) more event](inflect: true) in Calendar") {
-                    menu.dismiss()
+            ForEach(visibleEvents) { event in
+                EventRow(
+                    event: event,
+                    timeText: EventLayout.timeText(for: event, on: day, calendar: calendar),
+                    isPast: event.end <= now
+                )
+            }
+            let notShown = dayEvents.count - events.count
+            if notShown > 0 {
+                Button("\(notShown) more events in Calendar") {
+                    dismissMenu()
                     CalendarApp.open()
                 }
                 .buttonStyle(.plain)
@@ -107,10 +110,18 @@ struct DayEventList: View {
         }
     }
 
-    private func eventRows(_ events: [CalendarEvent]) -> some View {
+    /// The same rows as `rows`, for measuring only. Their time text uses each
+    /// event's own day, so they don't change when another day is selected.
+    private func sizingRows(_ events: [CalendarEvent]) -> some View {
         VStack(spacing: 2) {
-            ForEach(events) { event in
-                EventRow(event: event, timeText: timeText(for: event), isPast: event.end <= now)
+            ForEach(events.prefix(EventLayout.maxSizingRows)) { event in
+                EventRow(
+                    event: event,
+                    timeText: EventLayout.timeText(
+                        for: event, on: calendar.startOfDay(for: event.start), calendar: calendar
+                    ),
+                    isPast: false
+                )
             }
         }
     }
@@ -127,7 +138,7 @@ struct DayEventList: View {
                 if showPastEvents {
                     Text("Hide earlier events")
                 } else {
-                    Text("^[\(pastEvents.count) earlier event](inflect: true)")
+                    Text("\(pastEvents.count) earlier events")
                 }
             }
             .font(.caption)
@@ -140,7 +151,7 @@ struct DayEventList: View {
 
     /// "Yesterday", "Today" or "Tomorrow", in the user's language.
     private var relativeDayName: String? {
-        let offset = calendar.dateComponents([.day], from: today, to: day).day ?? 0
+        let offset = EventLayout.dayOffset(from: today, to: day, calendar: calendar)
         guard abs(offset) <= 1 else { return nil }
         return Self.relativeFormatter.localizedString(from: DateComponents(day: offset))
     }
@@ -152,40 +163,10 @@ struct DayEventList: View {
         formatter.formattingContext = .beginningOfSentence
         return formatter
     }()
-
-    private func timeText(for event: CalendarEvent) -> String {
-        // startOfDay: on a day where midnight is skipped, +1 day lands on 01:00.
-        let dayEnd = calendar.date(byAdding: .day, value: 1, to: day).map(calendar.startOfDay) ?? day
-
-        if event.isAllDay {
-            // EventKit ends all-day events at 23:59:59 on their last day.
-            let lastDay = calendar.startOfDay(for: event.end.addingTimeInterval(-1))
-            guard lastDay > calendar.startOfDay(for: event.start) else { return String(localized: "All-day") }
-            let range = (event.start..<lastDay).formatted(.interval.day().month(.abbreviated))
-            return String(localized: "All-day · \(range)")
-        }
-
-        let startsBefore = event.start < day
-        let endsAfter = event.end > dayEnd
-        let time = Date.FormatStyle(date: .omitted, time: .shortened)
-
-        switch (startsBefore, endsAfter) {
-        case (true, true):
-            return String(localized: "All-day")
-        case (true, false):
-            return String(localized: "Until \(event.end.formatted(time))")
-        case (false, true):
-            let ends = event.end.formatted(.dateTime.day().month(.abbreviated).hour().minute())
-            return String(localized: "\(event.start.formatted(time)) – \(ends)")
-        case (false, false):
-            if event.start == event.end { return event.start.formatted(time) }
-            return (event.start..<event.end).formatted(Date.IntervalFormatStyle(date: .omitted, time: .shortened))
-        }
-    }
 }
 
 private struct EventRow: View {
-    @Environment(MenuState.self) private var menu
+    @Environment(\.dismissMenu) private var dismissMenu
     let event: CalendarEvent
     let timeText: String
     let isPast: Bool
@@ -194,7 +175,7 @@ private struct EventRow: View {
 
     var body: some View {
         Button {
-            menu.dismiss()
+            dismissMenu()
             CalendarApp.show(event)
         } label: {
             HStack(alignment: .top, spacing: 8) {
@@ -228,8 +209,6 @@ private struct EventRow: View {
         .buttonStyle(.plain)
         .opacity(isPast ? 0.5 : 1)
         .onHover { isHovering = $0 }
-        // A closing menu sends no hover-exit, so clear it explicitly.
-        .onChange(of: menu.isOpen) { isHovering = false }
         .help("\(event.calendarTitle) — Open in Calendar")
     }
 

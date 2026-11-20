@@ -24,7 +24,8 @@ enum PrefKey {
 /// reads them. Menu bar defaults are `MenuBarFormat.standard`.
 enum PrefDefault {
     static let showWeekNumbers = false
-    static let firstWeekday = Calendar.regionFirstWeekday
+    /// 0 follows the region; 1–7 is Sunday–Saturday.
+    static let firstWeekday = 0
     static let dimWeekends = true
     static let showAllDayEvents = true
     static let rememberPastEvents = false
@@ -32,9 +33,6 @@ enum PrefDefault {
 }
 
 extension Calendar {
-    /// The first-weekday setting's value for "follow the region".
-    static let regionFirstWeekday = 0
-
     /// The user's calendar, with the first weekday overridden if set (1–7).
     static func mencal(firstWeekday: Int) -> Calendar {
         var calendar = Calendar.autoupdatingCurrent

@@ -4,8 +4,8 @@ import Foundation
 ///
 /// Date only. Standard formats follow the Mac's region (field order,
 /// punctuation, numerals), so the same settings read "Thu 19 Nov" in the UK
-/// and "Thu, Nov 19" in the US. A custom format is used as typed (trimmed, up
-/// to `maxCustomFormatLength` characters).
+/// and "Thu, Nov 19" in the US. A custom format is used as typed, after
+/// `sanitized(_:)`.
 struct MenuBarFormat {
     var weekday: WeekdayStyle = .short
     var showDay = true
@@ -21,15 +21,25 @@ struct MenuBarFormat {
     /// Longer custom patterns are cut off; a menu bar title has no use for them.
     static let maxCustomFormatLength = 64
 
-    func string(for date: Date) -> String {
+    /// `locale`, `calendar` and `timeZone` are parameters so tests can pin them.
+    func string(
+        for date: Date,
+        locale: Locale = .autoupdatingCurrent,
+        calendar: Calendar = .autoupdatingCurrent,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> String {
         if useCustomFormat {
-            let pattern = customFormat.prefix(Self.maxCustomFormatLength).trimmingCharacters(in: .whitespaces)
+            let pattern = Self.sanitized(customFormat)
             guard !pattern.isEmpty else { return "" }
-            Self.customFormatter.dateFormat = pattern
-            return Self.customFormatter.string(from: date)
+            let formatter = Self.customFormatter
+            formatter.locale = locale
+            formatter.calendar = calendar
+            formatter.timeZone = timeZone
+            formatter.dateFormat = pattern
+            return formatter.string(from: date)
         }
         guard weekday != .none || showDay || month != .none || showYear else { return "" }
-        var style = Date.FormatStyle.dateTime
+        var style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: timeZone)
         switch weekday {
         case .none: break
         case .short: style = style.weekday(.abbreviated)
@@ -46,13 +56,24 @@ struct MenuBarFormat {
         return date.formatted(style)
     }
 
-    private static let customFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
-        formatter.calendar = .autoupdatingCurrent
-        formatter.timeZone = .autoupdatingCurrent
-        return formatter
-    }()
+    /// Reused: this runs on every UserDefaults write and Settings preview.
+    private static let customFormatter = DateFormatter()
+
+    /// A custom pattern without control, line-break or invisible formatting
+    /// characters (such as a right-to-left override), capped by Unicode scalar so
+    /// stacked combining marks can't get past the limit, then trimmed.
+    static func sanitized(_ pattern: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in pattern.unicodeScalars where scalars.count < maxCustomFormatLength {
+            // Keep the zero-width joiner, which holds emoji sequences together.
+            switch scalar.properties.generalCategory {
+            case .control, .lineSeparator, .paragraphSeparator: continue
+            case .format where scalar != "\u{200D}": continue
+            default: scalars.append(scalar)
+            }
+        }
+        return String(scalars).trimmingCharacters(in: .whitespaces)
+    }
 }
 
 extension MenuBarFormat {

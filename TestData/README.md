@@ -1,6 +1,6 @@
 # Test calendars
 
-Four `.ics` files with events placed around **today**, for testing Mencal in Calendar.app.
+Five `.ics` files with events placed around **today**, for testing Mencal in Calendar.app.
 
 | File | Calendar | What it tests |
 |---|---|---|
@@ -8,6 +8,7 @@ Four `.ics` files with events placed around **today**, for testing Mencal in Cal
 | `02-mencal-personal.ics` | Personal (pink) | All-day and multi-day all-day events, a yearly birthday, an event that crosses midnight, a finished morning event (dimmed) |
 | `03-mencal-busy-day.ics` | Busy Day (green) | 12 events tomorrow, so the list scrolls. Includes a very long title, emoji, Greek text, a zero-length event and an untitled event |
 | `04-mencal-edge-cases.ics` | Edge Cases (purple) | A timed event spanning 3 days, midnight and 23:30 events, UTC-stored events (New York, Tokyo), events on the grid's leading and trailing days, an all-day event across the month boundary, New Year's Day |
+| `05-mencal-hostile.ics` | Hostile (grey) | What spam or a broken feed might contain: a 20,000-character title, Zalgo text, a right-to-left override, Markdown and format specifiers, an end before its start, and 1,500 overlapping multi-week events. The menu should stay responsive and show everything as plain text. Import it on its own and delete it after testing. |
 
 ## Importing
 
@@ -15,7 +16,7 @@ Four `.ics` files with events placed around **today**, for testing Mencal in Cal
 2. When asked where to add the events, choose **New Calendar**, so each file gets its own calendar and colour. Make sure it's created under **On My Mac**, not iCloud, so the test events don't sync to your other devices.
 3. Repeat for each file.
 
-The quickest way to remove everything afterwards is to delete the four *Mencal Test – …* calendars.
+The quickest way to remove everything afterwards is to delete the *Mencal Test – …* calendars.
 
 ## Regenerating
 
