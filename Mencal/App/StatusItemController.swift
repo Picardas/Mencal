@@ -5,8 +5,8 @@ import SwiftUI
 /// Shared between the status item and the SwiftUI calendar in its menu.
 @Observable
 final class MenuState {
-    /// True while the menu is open. The calendar resets to today on opening
-    /// and only fetches events while open.
+    /// True from preparing the menu until it closes. The calendar resets to
+    /// today when built and only fetches events while this is true.
     fileprivate(set) var isOpen = false
 
     @ObservationIgnored fileprivate var close: () -> Void = {}
@@ -25,17 +25,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
-    private let calendarView: MenuHostingView
+    private let calendarItem = NSMenuItem()
+    /// True from menuWillOpen to menuDidClose.
+    private var isTracking = false
+    /// When the calendar was last built, so back-to-back `menuNeedsUpdate`
+    /// calls for one opening don't build (and fetch) it twice.
+    private var preparedAt = Date.distantPast
 
     init(ticker: DateTicker, store: CalendarStore) {
         self.ticker = ticker
         self.store = store
-        calendarView = MenuHostingView(rootView: AnyView(
-            CalendarMenuView()
-                .environment(ticker)
-                .environment(store)
-                .environment(menuState)
-        ))
         super.init()
 
         menuState.close = { [weak self] in self?.menu.cancelTracking() }
@@ -62,8 +61,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
 
-        let calendarItem = NSMenuItem()
-        calendarItem.view = calendarView
         menu.addItem(calendarItem)
         menu.addItem(.separator())
 
@@ -78,19 +75,61 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         ))
     }
 
+    /// NSMenu calls this before it measures its items, so the calendar is
+    /// built here. It can also be called without the menu opening; a later
+    /// opening then simply rebuilds.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard !isTracking, Date().timeIntervalSince(preparedAt) > 1 else { return }
+        prepareCalendar()
+    }
+
     func menuWillOpen(_ menu: NSMenu) {
+        isTracking = true
+        if calendarItem.view == nil { prepareCalendar() }
+    }
+
+    /// Builds the calendar view fresh for each opening. A SwiftUI view that
+    /// was taken out of a window (as NSMenu does on close) defers its
+    /// updates, so a reused one would be measured showing the previous
+    /// opening. A new view renders today's state on its first layout, so its
+    /// size is exact; NSMenu then holds that size while open.
+    private func prepareCalendar() {
         store.refreshAccess()
         ticker.refresh()
         menuState.isOpen = true
-        // Settle the size before the menu measures its items; it's then held.
-        calendarView.layoutSubtreeIfNeeded()
-        calendarView.fitToContent()
-        calendarView.isMenuOpen = true
+        let view = NSHostingView(rootView: CalendarMenuView()
+            .environment(ticker).environment(store).environment(menuState))
+        // Lay out first so the initial onChange (reset, fetch) has run, then
+        // measure. Only then stop the view from resizing itself: with no
+        // sizing options, fittingSize would be zero.
+        view.layoutSubtreeIfNeeded()
+        let size = view.fittingSize
+        view.sizingOptions = []
+        view.setFrameSize(size)
+        calendarItem.view = view
+        preparedAt = Date()
+    }
+
+    /// The menu has no key equivalents, so key presses never need to search
+    /// it (or prepare it via `menuNeedsUpdate`).
+    func menuHasKeyEquivalent(
+        _ menu: NSMenu, for event: NSEvent,
+        target: AutoreleasingUnsafeMutablePointer<AnyObject?>,
+        action: UnsafeMutablePointer<Selector?>
+    ) -> Bool {
+        false
     }
 
     func menuDidClose(_ menu: NSMenu) {
+        isTracking = false
+        preparedAt = .distantPast
         menuState.isOpen = false
-        calendarView.isMenuOpen = false
+        // Release the view while closed, but not mid-action: closing can be
+        // triggered by one of its own buttons.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isTracking else { return }
+            self.calendarItem.view = nil
+        }
     }
 
     @objc private func openCalendar() {
@@ -116,38 +155,3 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 }
 
-/// Hosts SwiftUI in a menu item, sized to its content.
-///
-/// An open NSMenu doesn't relayout when an item's view resizes; it scrolls
-/// instead, hiding the top of the calendar. So resizing waits until the menu
-/// is closed. The calendar keeps a constant height while open anyway.
-private final class MenuHostingView: NSHostingView<AnyView> {
-    var isMenuOpen = false {
-        didSet { if !isMenuOpen { fitToContent() } }
-    }
-
-    required init(rootView: AnyView) {
-        super.init(rootView: rootView)
-        fitToContent()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    override func invalidateIntrinsicContentSize() {
-        super.invalidateIntrinsicContentSize()
-        // After SwiftUI finishes this update pass.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isMenuOpen else { return }
-            self.fitToContent()
-        }
-    }
-
-    func fitToContent() {
-        let size = fittingSize
-        guard size.width > 0, size.height > 0, size != frame.size else { return }
-        setFrameSize(size)
-    }
-}

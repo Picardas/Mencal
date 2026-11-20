@@ -17,6 +17,7 @@ struct CalendarMenuView: View {
     @State private var displayedMonth = Date()
     @State private var selectedDay = Calendar.autoupdatingCurrent.startOfDay(for: Date())
     @State private var eventsByDay: [Date: [CalendarEvent]] = [:]
+    @State private var sizingDays: [[CalendarEvent]] = []
     @State private var monthDirection: Edge = .trailing
     @State private var showPastEvents = false
     @State private var lastFetch = FetchMemo()
@@ -63,6 +64,7 @@ struct CalendarMenuView: View {
                     now: ticker.now,
                     calendar: calendar,
                     events: eventsByDay[selectedDay] ?? [],
+                    sizingDays: sizingDays,
                     showPastEvents: $showPastEvents
                 )
             } else {
@@ -73,6 +75,9 @@ struct CalendarMenuView: View {
         .padding(.top, 10)
         .padding(.bottom, 6)
         .frame(width: showWeekNumbers ? 316 : 296)
+        // While the menu is open its height is held; keep the content pinned
+        // to the top rather than centred if it would be shorter.
+        .frame(maxHeight: .infinity, alignment: .top)
         .clipped()
         .onChange(of: menu.isOpen, initial: true) { _, isOpen in
             if isOpen {
@@ -142,6 +147,21 @@ struct CalendarMenuView: View {
         )
     }
 
+    private struct SizingCandidate {
+        let day: Date
+        let events: [CalendarEvent]
+        let estimate: Double
+    }
+
+    /// A rough relative height for a day's list: one per row, plus extra
+    /// for a location line or a title likely to wrap. Only used to pick
+    /// candidates; the real height is measured.
+    private static func estimatedHeight(of events: [CalendarEvent]) -> Double {
+        events.prefix(8).reduce(0) { total, event in
+            total + 1 + (event.location == nil ? 0 : 0.35) + (event.title.count > 32 ? 0.4 : 0)
+        }
+    }
+
     /// Groups the shown events by day. Runs only while the menu is open, and
     /// only queries EventKit when something the events depend on changed.
     private func reloadEvents() {
@@ -168,6 +188,16 @@ struct CalendarMenuView: View {
             }
         }
         eventsByDay = buckets
+        // The shown month's tallest-looking days. Rows differ in height (a
+        // location line, two-line titles), so a rough estimate shortlists a
+        // few and the list measures them exactly. Ties go to the earliest
+        // day, so the choice (and the menu's height) is the same every time.
+        var candidates: [SizingCandidate] = []
+        for (day, events) in buckets where calendar.isDate(day, equalTo: displayedMonth, toGranularity: .month) {
+            candidates.append(SizingCandidate(day: day, events: events, estimate: Self.estimatedHeight(of: events)))
+        }
+        candidates.sort { $0.estimate != $1.estimate ? $0.estimate > $1.estimate : $0.day < $1.day }
+        sizingDays = candidates.prefix(3).map(\.events)
     }
 }
 

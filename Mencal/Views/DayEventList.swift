@@ -7,13 +7,27 @@ struct DayEventList: View {
     let now: Date
     let calendar: Calendar
     let events: [CalendarEvent]
+    /// The shown month's tallest-looking days. Laid out invisibly so the
+    /// menu opens tall enough for any day that month (up to the maximum).
+    let sizingDays: [[CalendarEvent]]
 
     /// Whether today's finished events are shown. CalendarMenuView sets it
     /// each time the menu opens.
     @Binding var showPastEvents: Bool
 
-    /// Fits about five events; more scroll.
-    private static let listHeight: CGFloat = 270
+    @Environment(MenuState.self) private var menu
+
+    /// The list fits its content between these heights; about five events
+    /// fit at the maximum, more scroll.
+    private static let minListHeight: CGFloat = 60
+    private static let maxListHeight: CGFloat = 270
+
+    /// A huge feed can't make the menu lay out thousands of rows; the rest
+    /// are a click away in Calendar.app.
+    private static let maxRows = 100
+
+    /// Enough rows to pass `maxListHeight`; more would be laid out for nothing.
+    private static let maxSizingRows = 8
 
     /// Only today hides finished events; other days show everything.
     private var pastEvents: [CalendarEvent] {
@@ -40,26 +54,38 @@ struct DayEventList: View {
             }
             .padding(.horizontal, 4)
 
-            // Fixed height, toggle included, because an open menu can't resize.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    if !pastEvents.isEmpty {
-                        pastEventsToggle
-                    }
+            // When the menu opens, the list is as tall as the taller of this
+            // day and the month's busiest day, between the min and max. An
+            // open menu can't resize, so while open it keeps that height and
+            // scrolls if needed.
+            ZStack(alignment: .top) {
+                // The ZStack takes the tallest of these.
+                ForEach(sizingDays.indices, id: \.self) { index in
+                    eventRows(Array(sizingDays[index].prefix(Self.maxSizingRows)))
+                        .hidden()
+                        .accessibilityHidden(true)
+                }
 
-                    if visibleEvents.isEmpty {
-                        Text(events.isEmpty ? "No Events" : "No More Events Today")
-                            .font(.callout)
-                            .foregroundStyle(.tertiary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 40)
-                    } else {
-                        rows
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if !pastEvents.isEmpty {
+                            pastEventsToggle
+                        }
+
+                        if visibleEvents.isEmpty {
+                            Text(events.isEmpty ? "No Events" : "No More Events Today")
+                                .font(.callout)
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, minHeight: Self.minListHeight)
+                        } else {
+                            rows
+                        }
                     }
                 }
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .scrollBounceBehavior(.basedOnSize)
-            .frame(height: Self.listHeight)
+            .frame(minHeight: Self.minListHeight, maxHeight: Self.maxListHeight)
+            .clipped()
             // Each day starts scrolled to the top.
             .id(day)
         }
@@ -67,12 +93,24 @@ struct DayEventList: View {
 
     private var rows: some View {
         VStack(spacing: 2) {
-            ForEach(visibleEvents) { event in
-                EventRow(
-                    event: event,
-                    timeText: timeText(for: event),
-                    isPast: event.end <= now
-                )
+            eventRows(Array(visibleEvents.prefix(Self.maxRows)))
+            if visibleEvents.count > Self.maxRows {
+                Button("^[\(visibleEvents.count - Self.maxRows) more event](inflect: true) in Calendar") {
+                    menu.dismiss()
+                    CalendarApp.open()
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func eventRows(_ events: [CalendarEvent]) -> some View {
+        VStack(spacing: 2) {
+            ForEach(events) { event in
+                EventRow(event: event, timeText: timeText(for: event), isPast: event.end <= now)
             }
         }
     }
