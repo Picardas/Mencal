@@ -5,14 +5,14 @@
 # Mencal
 A Menubar Calendar for macOS
 
-Mencal puts today's date in the menu bar (e.g. `Thu 19 Nov`) in the standard menu bar font. Click it for a menu with a month calendar and the selected day's events, in your Calendar.app colours.
+Mencal puts today's date in the menu bar (e.g. `Sat 21 Nov`) in the standard menu bar font. Click it for a menu with a month calendar and the selected day's events, in your Calendar.app colours.
 
 <p align="center">
   <img src="docs/images/menu-bar.png" width="186" alt="Mencal's date in the menu bar, beside Control Center and the clock">
 </p>
 
 <p align="center">
-  <img src="docs/images/calendar-menu.png" width="305" alt="Mencal's menu: a month calendar with today's events as menu items">
+  <img src="docs/images/calendar-menu.png" width="309" alt="Mencal's menu: a month calendar with today's events as menu items">
 </p>
 
 ## Features
@@ -23,7 +23,7 @@ Mencal puts today's date in the menu bar (e.g. `Thu 19 Nov`) in the standard men
 - **Day agenda.** The selected day's events are standard menu items under the calendar: the title, the time and location as a subtitle, and a bar in the calendar's colour running beside them, as in Calendar.app. Today's finished events sit in an *earlier events* submenu. Declined invitations and cancelled events are hidden, as in Calendar.app. Up to 8 upcoming events are listed (fewer if the screen is short, so Open Calendar and Settings stay in view); the rest are in a *more events* submenu. Days with over 100 events link to the remainder in Calendar.app.
 
 <p align="center">
-  <img src="docs/images/calendar-menu-earlier-events.png" width="450" alt="The earlier events submenu, listing today's finished events">
+  <img src="docs/images/calendar-menu-earlier-events.png" width="440" alt="The earlier events submenu, listing today's finished events">
 </p>
 
 - **Read-only.** Mencal never writes to your calendars. Clicking an event opens it in Calendar.app; *Open Calendar* or double-clicking a day opens the app for edits.
